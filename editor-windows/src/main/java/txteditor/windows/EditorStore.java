@@ -13,7 +13,9 @@ import java.util.Properties;
 final class EditorStore {
     /** 与安卓端一致的 16 MiB 大文件口径。 */
     static final long LARGE_FILE_LIMIT = 16L << 20;
-    private static final String HEADER = "txteditor-session 1";
+    private static final String HEADER = "txteditor-session 2";
+    /** 旧草稿没有 language/viewMode，读到时按纯文本 + 源码模式补齐。 */
+    private static final String HEADER_V1 = "txteditor-session 1";
     private static final String SESSION = "session.dat";
     private static final String PREFS = "prefs.properties";
 
@@ -40,6 +42,8 @@ final class EditorStore {
         field(out, snapshot.pattern);
         field(out, snapshot.replacement);
         out.append(snapshot.searchOpen).append('\n');
+        field(out, snapshot.language);
+        out.append(snapshot.viewMode).append('\n');
         Path file = directory().resolve(SESSION);
         Files.createDirectories(file.getParent());
         SafeFiles.write(file, out.toString());
@@ -49,9 +53,17 @@ final class EditorStore {
     static SessionSnapshot readSession() {
         try {
             Cursor cursor = new Cursor(SafeFiles.read(directory().resolve(SESSION)));
-            if (!HEADER.equals(cursor.line())) return null;
-            return new SessionSnapshot(cursor.field(), cursor.field(), cursor.field(), cursor.number(), cursor.number(),
-                    cursor.number(), cursor.field(), cursor.field(), Boolean.parseBoolean(cursor.line()));
+            String header = cursor.line();
+            boolean latest = HEADER.equals(header);
+            if (!latest && !HEADER_V1.equals(header)) return null;
+            String text = cursor.field(), savedText = cursor.field(), fileName = cursor.field();
+            int start = cursor.number(), end = cursor.number(), scroll = cursor.number();
+            String pattern = cursor.field(), replacement = cursor.field();
+            boolean open = Boolean.parseBoolean(cursor.line());
+            String language = latest ? cursor.field() : "PLAIN";
+            int viewMode = latest ? cursor.number() : 0;
+            return new SessionSnapshot(text, savedText, fileName, start, end, scroll, pattern, replacement, open,
+                    language, viewMode == 1 ? 1 : 0);
         } catch (IOException | RuntimeException unreadable) {
             return null;
         }

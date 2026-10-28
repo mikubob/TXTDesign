@@ -10,6 +10,9 @@ import txteditor.core.TextCodec;
 final class DraftFormat {
     private DraftFormat() { }
 
+    /** 2 = 追加 language / viewMode；版本 1 的旧草稿仍按纯文本 + 源码补齐。 */
+    private static final int VERSION = 2;
+
     static final class Decoded {
         final SessionSnapshot snapshot;
         final String uri;
@@ -18,19 +21,28 @@ final class DraftFormat {
 
     // 字段顺序沿用旧 Draft 格式，升级前写下的草稿仍能恢复。
     static void write(DataOutputStream out, SessionSnapshot snapshot, String uri) throws IOException {
-        out.writeInt(1);
+        out.writeInt(VERSION);
         writeString(out, snapshot.text); writeString(out, snapshot.savedText); writeString(out, uri);
         writeString(out, snapshot.fileName); writeString(out, snapshot.pattern); writeString(out, snapshot.replacement);
         out.writeInt(snapshot.selectionStart); out.writeInt(snapshot.selectionEnd); out.writeInt(snapshot.scroll);
         out.writeBoolean(snapshot.searchOpen);
+        writeString(out, snapshot.language); out.writeInt(snapshot.viewMode);
     }
 
     static Decoded read(DataInputStream in) throws IOException {
-        if (in.readInt() != 1) throw new IOException("草稿版本不支持");
+        int version = in.readInt();
+        if (version != 1 && version != VERSION) throw new IOException("草稿版本不支持");
         String text = readString(in); String saved = readString(in); String uri = readString(in);
         String name = readString(in); String pattern = readString(in); String replacement = readString(in);
         int start = in.readInt(); int end = in.readInt(); int scroll = in.readInt(); boolean search = in.readBoolean();
-        return new Decoded(new SessionSnapshot(text, saved, name, start, end, scroll, pattern, replacement, search), uri);
+        String language = "PLAIN";
+        int viewMode = 0;
+        if (version >= 2) {
+            language = readString(in);
+            viewMode = in.readInt() == 1 ? 1 : 0;
+        }
+        return new Decoded(new SessionSnapshot(text, saved, name, start, end, scroll, pattern, replacement, search,
+                language, viewMode), uri);
     }
 
     private static void writeString(DataOutputStream out, String value) throws IOException {

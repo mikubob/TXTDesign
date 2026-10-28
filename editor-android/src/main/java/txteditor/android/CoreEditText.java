@@ -15,6 +15,7 @@ import txteditor.core.EditorModel;
 public final class CoreEditText extends AppCompatEditText {
     private EditorModel model;
     private Runnable changed;
+    private HighlightController highlight;
     private boolean writing;
     private int batch, inputDepth, platformBatch;
     private final Runnable flush = () -> sync(false);
@@ -32,12 +33,17 @@ public final class CoreEditText extends AppCompatEditText {
 
     void bind(EditorModel core, Runnable listener) { model = core; changed = listener; render(); }
 
+    void attachHighlight(HighlightController controller) { highlight = controller; controller.attach(this); }
+
     void render() {
         writing = true;
         String text = model.getText();
-        if (!getText().toString().equals(text)) getText().replace(0, length(), text);
+        boolean replaced = false;
+        if (!getText().toString().equals(text)) { getText().replace(0, length(), text); replaced = true; }
         setSelection(model.getSelectionStart(), model.getSelectionEnd());
         writing = false;
+        // 整体回写会清掉 span，需要重扫；普通按键走 TextEdits 的三元组增量。
+        if (replaced && highlight != null) highlight.reload();
     }
 
     void sync(boolean finishComposition) {
@@ -49,11 +55,18 @@ public final class CoreEditText extends AppCompatEditText {
         if (!finishComposition && (batch > 0 || platformBatch > 0 || BaseInputConnection.getComposingSpanStart(getText()) >= 0)) return;
         // 一次提交（含 IME 组合结束、长串输入）只产生一条历史，撤销整条还原。
         // shortcut: 每次 sync 独立成事务，连续按键仍是逐条历史；要合并连打需等输入空闲再结束事务。
+        int[] change;
         model.beginTransaction();
-        try { TextEdits.commit(model, getText().toString(), getSelectionStart(), getSelectionEnd()); }
+        try { change = TextEdits.commit(model, getText().toString(), getSelectionStart(), getSelectionEnd()); }
         finally { model.endTransaction(); }
+        if (change != null && highlight != null) highlight.onTextChanged(change[0], change[1], change[2]);
         if (!model.getText().equals(getText().toString())) render();
         if (changed != null) changed.run();
+    }
+
+    @Override protected void onScrollChanged(int left, int top, int oldLeft, int oldTop) {
+        super.onScrollChanged(left, top, oldLeft, oldTop);
+        if (highlight != null) highlight.onScroll();
     }
 
     @Override protected void onSelectionChanged(int start, int end) {

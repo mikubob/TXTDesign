@@ -33,15 +33,15 @@ public final class GuiTest {
             modernInteractions();
             docking();
             edt(() -> { window.area.requestFocusInWindow(); window.area.replaceSelection("中文😀\n第二行\n中文"); return null; });
-            waitFor(() -> edt(() -> window.model.getText().equals(window.area.getText())));
+            waitFor(() -> edt(() -> window.model.getText().equals(SyntaxPainter.text(window.area))));
             edt(() -> {
                 eq("中文😀\n第二行\n中文", window.model.getText()); check(window.getTitle().startsWith("*"));
                 window.query.setText("中文"); window.model.setSelection(0, 0); window.binding.syncSelection(); window.find();
                 eq(0, window.area.getSelectionStart()); eq(2, window.area.getSelectionEnd());
                 window.replacement.setText("替换"); window.replaceCurrent(); eq("替换😀\n第二行\n中文", window.model.getText());
-                menu("编辑", "撤销").doClick(); eq("中文😀\n第二行\n中文", window.area.getText());
-                menu("编辑", "重做").doClick(); eq("替换😀\n第二行\n中文", window.area.getText());
-                window.area.select(0, 2); window.area.copy(); window.area.setCaretPosition(window.area.getText().length()); window.area.paste();
+                menu("编辑", "撤销").doClick(); eq("中文😀\n第二行\n中文", SyntaxPainter.text(window.area));
+                menu("编辑", "重做").doClick(); eq("替换😀\n第二行\n中文", SyntaxPainter.text(window.area));
+                window.area.select(0, 2); window.area.copy(); window.area.setCaretPosition(SyntaxPainter.text(window.area).length()); window.area.paste();
                 eq("替换😀\n第二行\n中文替换", window.model.getText());
                 window.area.select(0, 2); menu("编辑", "剪切").doClick(); eq("😀\n第二行\n中文替换", window.model.getText());
                 menu("编辑", "撤销").doClick(); eq("替换😀\n第二行\n中文替换", window.model.getText());
@@ -63,9 +63,9 @@ public final class GuiTest {
             eq("替换😀\n第二行\n中文替换", SafeFiles.read(saved));
             check(((JMenu) menu("文件", "最近文件")).getItem(0).isEnabled());
             System.out.println("GuiTest: saved UTF-8; checking leave protection");
-            edt(() -> { window.area.append("未保存"); return null; });
+            edt(() -> { insert(window, "未保存"); return null; });
             invokeMenu("文件", "新建"); clickDialog("取消");
-            edt(() -> { check(window.area.getText().endsWith("未保存")); check(window.model.isModified()); return null; });
+            edt(() -> { check(SyntaxPainter.text(window.area).endsWith("未保存")); check(window.model.isModified()); return null; });
             invokeMenu("文件", "新建"); clickDialog("保存");
             waitFor(() -> edt(() -> window.model.getText().isEmpty() && !window.model.isModified() && window.area.isEditable()));
             check(SafeFiles.read(saved).endsWith("未保存"));
@@ -80,6 +80,8 @@ public final class GuiTest {
             waitFor(() -> edt(() -> window.getTitle().startsWith("sample.txt") && window.area.isEditable()));
             robot.waitForIdle();
             previews(robot);
+            sourceHighlighting(directory, robot);
+            markdownPreview(directory, robot);
             sessionRestore();
             System.out.println("GuiTest PASS: " + checks + " checks; scale=" + UIScale.getUserScaleFactor() + "; previews=build/preview-*.png");
         } finally {
@@ -142,11 +144,11 @@ public final class GuiTest {
             window.area.replaceSelection("主题切换保留中文😀与选区"); window.area.select(0, 4);
             String text = window.model.getText(); int start = window.area.getSelectionStart(), end = window.area.getSelectionEnd();
             menu("视图", "深色").doClick();
-            check(FlatLaf.isLafDark()); eq(text, window.area.getText());
+            check(FlatLaf.isLafDark()); eq(text, SyntaxPainter.text(window.area));
             eq(start, window.area.getSelectionStart()); eq(end, window.area.getSelectionEnd()); check(window.model.canUndo());
             check(button(window, "主题：深色").getAccessibleContext().getAccessibleName().equals("主题：深色"));
             checkContrast(); menu("视图", "浅色").doClick(); check(!FlatLaf.isLafDark()); checkContrast();
-            menu("编辑", "撤销").doClick(); eq("", window.area.getText());
+            menu("编辑", "撤销").doClick(); eq("", SyntaxPainter.text(window.area));
             window.model.load(""); window.binding.refresh(); return null;
         });
         System.out.println("GuiTest: theme, zoom, search visibility/focus, shortcuts and shared actions checked");
@@ -178,17 +180,22 @@ public final class GuiTest {
         edt(() -> { window.area.requestFocusInWindow(); window.area.setCaretPosition(0); window.area.selectAll();
             window.area.replaceSelection("会话恢复😀\n第二行"); return null; });
         waitFor(() -> edt(() -> window.model.getText().startsWith("会话恢复😀\n第二行")));
+        edt(() -> { key("control E"); return null; }); // 预览状态一起写进 v2 会话
+        waitFor(() -> edt(() -> window.previewMode));
         Thread.sleep(1200);
         Path session = EditorStore.directory().resolve("session.dat");
         check(Files.exists(session));
         check(SafeFiles.read(session).contains("会话恢复😀\n第二行"));
+        check(SafeFiles.read(session).startsWith("txteditor-session 2"));
         String expected = edt(() -> window.model.getText());
         int caret = edt(() -> window.model.getSelectionEnd());
         edt(() -> { window.setVisible(false); return null; });
         EditorWindow second = edt(() -> { EditorWindow frame = new EditorWindow(); frame.setVisible(true); return frame; });
+        waitFor(() -> edt(() -> second.previewMode));
         edt(() -> {
-            eq(expected, second.area.getText()); eq(caret, second.model.getSelectionEnd());
+            eq(expected, SyntaxPainter.text(second.area)); eq(caret, second.model.getSelectionEnd());
             check(second.status.getText().startsWith("已恢复上次会话"));
+            check(second.previewMode); check(!second.area.isShowing()); // v2 会话恢复了预览模式
             return null;
         });
         EditorWindow first = window;
@@ -199,12 +206,115 @@ public final class GuiTest {
         eq(expected, SafeFiles.read(resaved));
         window = first;
         edt(() -> {
-            second.area.append("继续");
+            insert(second, "继续");
             check(!second.status.getText().startsWith("已恢复上次会话")); // 提示只出现一次
             return null;
         });
         edt(() -> { second.dispose(); window.setVisible(true); return null; });
         System.out.println("GuiTest: session draft and crash restore checked");
+    }
+
+    /** 3.0：打开 .java 后可视行被上色（关键字有前景色、注释斜体），语言写进状态栏。 */
+    private static void sourceHighlighting(Path directory, Robot robot) throws Exception {
+        Path java = directory.resolve("示例.java");
+        String source = "public class 示例 {\n    // 中文注释\n    private int value = 42;\n}\n";
+        Files.write(java, source.getBytes("UTF-8"));
+        invokeMenu("文件", "打开…"); choose(java);
+        waitFor(() -> edt(() -> window.getTitle().startsWith("示例.java") && window.area.isEditable()));
+        waitFor(() -> edt(() -> attrs(window, 0).isDefined(javax.swing.text.StyleConstants.Foreground))); // 上色在 invokeLater 里
+        edt(() -> {
+            eq(txteditor.core.text.LanguageId.JAVA, window.language);
+            check(window.status.getText().contains("Java"));
+            check(attrs(window, 0).isDefined(javax.swing.text.StyleConstants.Foreground));       // public
+            check(attrs(window, source.indexOf("class")).isDefined(javax.swing.text.StyleConstants.Foreground));
+            check(!attrs(window, 6).isDefined(javax.swing.text.StyleConstants.Foreground));      // 空白不上色
+            int comment = source.indexOf("//");
+            check(attrs(window, comment).isDefined(javax.swing.text.StyleConstants.Foreground));
+            check(javax.swing.text.StyleConstants.isItalic(attrs(window, comment)));
+            check(!menu("视图", "预览 Markdown").isEnabled());
+            return null;
+        });
+        robot.waitForIdle();
+        render("preview-java.png");
+        edt(() -> { menu("视图", "深色").doClick(); window.validate(); return null; });
+        waitFor(() -> edt(() -> attrs(window, 0).isDefined(javax.swing.text.StyleConstants.Foreground)));
+        robot.waitForIdle();
+        render("preview-java-dark.png");
+        edt(() -> { menu("视图", "浅色").doClick(); return null; });
+        System.out.println("GuiTest: java syntax colours and language label checked");
+    }
+
+    private static javax.swing.text.AttributeSet attrs(EditorWindow target, int offset) {
+        return target.area.getStyledDocument().getCharacterElement(offset).getAttributes();
+    }
+
+    /** 3.0：Markdown 识别、Ctrl+E 预览、预览下缩放/主题、手动改语言。 */
+    private static void markdownPreview(Path directory, Robot robot) throws Exception {
+        Path md = directory.resolve("说明.md");
+        String source = "# 标题\n\n段落 **粗体** 与 `代码` 与 [链接](https://example.com)。\n\n"
+                + "- 项目一\n- 项目二\n\n> 引用一行\n\n```java\nclass A { int value = 1; }\n```\n\n"
+                + "| 列 | 值 |\n| --- | --- |\n| a | 1 |\n\n---\n";
+        Files.write(md, source.getBytes("UTF-8"));
+        invokeMenu("文件", "打开…"); choose(md);
+        waitFor(() -> edt(() -> window.getTitle().startsWith("说明.md") && window.area.isEditable()));
+        edt(() -> {
+            eq(txteditor.core.text.LanguageId.MARKDOWN, window.language);
+            check(window.status.getText().contains("Markdown"));
+            check(menu("视图", "预览 Markdown").isEnabled());
+            window.area.setCaretPosition(0); window.area.select(2, 4);
+            return null;
+        });
+        waitFor(() -> edt(() -> window.model.getSelectionStart() == 2 && window.model.getSelectionEnd() == 4));
+        String text = edt(() -> window.model.getText());
+        edt(() -> { key("control E"); return null; });
+        waitFor(() -> edt(() -> window.previewMode));
+        edt(() -> {
+            check(window.preview.pane().isShowing());
+            check(window.preview.pane().getStyledDocument().getLength() > 0);
+            eq("Markdown 预览区", window.preview.pane().getAccessibleContext().getAccessibleName());
+            eq(text, window.model.getText());
+            eq(2, window.model.getSelectionStart()); // 预览不动模型、不丢选区
+            check(SyntaxPainter.text(window.area).startsWith("# 标题"));
+            return null;
+        });
+        robot.waitForIdle();
+        render("preview-markdown.png");
+        edt(() -> { menu("视图", "深色").doClick(); key("control EQUALS"); window.validate(); return null; });
+        robot.waitForIdle();
+        render("preview-markdown-dark.png");
+        edt(() -> {
+            check(FlatLaf.isLafDark()); check(window.previewMode);
+            check(window.preview.pane().getStyledDocument().getLength() > 0);
+            menu("视图", "浅色").doClick(); key("control 0");
+            return null;
+        });
+        edt(() -> {
+            key("control E"); window.validate();
+            return null;
+        });
+        waitFor(() -> edt(() -> !window.previewMode));
+        edt(() -> {
+            check(window.area.isShowing());
+            eq(2, window.model.getSelectionStart()); eq(4, window.model.getSelectionEnd());
+            eq(text, window.model.getText());
+            check(!window.model.isModified());
+            return null;
+        });
+        JMenu languages = (JMenu) menu("视图", "语言");
+        edt(() -> {
+            for (int i = 0; i < languages.getItemCount(); i++)
+                if (languages.getItem(i).getText().equals("Java")) languages.getItem(i).doClick();
+            return null;
+        });
+        edt(() -> {
+            eq(txteditor.core.text.LanguageId.JAVA, window.language);
+            check(!menu("视图", "预览 Markdown").isEnabled()); // 非 Markdown 无预览
+            for (int i = 0; i < languages.getItemCount(); i++)
+                if (languages.getItem(i).getText().equals("Markdown")) languages.getItem(i).doClick();
+            return null;
+        });
+        edt(() -> { check(menu("视图", "预览 Markdown").isEnabled()); return null; });
+        System.out.println("GuiTest: language detection, preview toggle, zoom and theme in preview checked");
     }
 
     private static void previews(Robot robot) throws Exception {
@@ -244,7 +354,7 @@ public final class GuiTest {
                     check(b.getToolTipText() != null); check(b.getAccessibleContext().getAccessibleName() != null);
                 }
             }
-            if (c instanceof JLabel && c != window.area) {
+            if (c instanceof JLabel) {
                 // File paths intentionally use JLabel ellipsis; other labels must fit.
                 JLabel label = (JLabel) c;
                 if (label.getToolTipText() == null) check(c.getWidth() >= c.getPreferredSize().width);
@@ -277,6 +387,16 @@ public final class GuiTest {
             Graphics2D graphics = image.createGraphics(); root.printAll(graphics); graphics.dispose(); return image;
         });
         ImageIO.write(render, "png", Paths.get("build", name).toFile());
+    }
+
+    /** JTextPane 没有 append；写文档才会经过 DocumentFilter 落进模型。 */
+    private static void insert(EditorWindow target, String text) {
+        try {
+            javax.swing.text.Document document = target.area.getDocument();
+            document.insertString(document.getLength(), text, null);
+        } catch (javax.swing.text.BadLocationException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     private static void key(String stroke) {

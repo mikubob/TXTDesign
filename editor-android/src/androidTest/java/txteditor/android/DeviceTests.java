@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import txteditor.core.EditorModel;
 import txteditor.core.SessionSnapshot;
 import txteditor.core.TextCodec;
+import txteditor.core.text.LanguageId;
 
 public final class DeviceTests extends Instrumentation {
     private int checks;
@@ -256,12 +257,20 @@ public final class DeviceTests extends Instrumentation {
         }
         ready();
         ui(() -> equal(orientation, activity.getResources().getConfiguration().orientation));
+        String mode = arguments.getString("preview");
+        boolean javaMode = mode.startsWith("java"), markdownMode = mode.startsWith("markdown");
         ui(() -> {
-            state.newDocument(); state.search = false; state.name = "随手记.txt";
-            state.core.load("简文本，让思绪流动\n\n今天，留一点时间给文字。\n在这里记录灵感、整理课程笔记，或写下一段还没成形的想法。\n\n把注意力交给内容\n• 中文与表情自然输入 😀\n• 随时撤销，安心修改\n• 查找与替换，快速定位\n\n每一次保存，都由你掌握。\n");
+            state.newDocument(); state.search = false;
+            state.name = javaMode ? "示例.java" : markdownMode ? "说明.md" : "随手记.txt";
+            state.language = javaMode ? LanguageId.JAVA : markdownMode ? LanguageId.MARKDOWN : LanguageId.PLAIN;
+            state.core.load(javaMode ? JAVA_SAMPLE : markdownMode ? MD_SAMPLE
+                    : "简文本，让思绪流动\n\n今天，留一点时间给文字。\n在这里记录灵感、整理课程笔记，或写下一段还没成形的想法。\n\n把注意力交给内容\n• 中文与表情自然输入 😀\n• 随时撤销，安心修改\n• 查找与替换，快速定位\n\n每一次保存，都由你掌握。\n");
             state.saved = state.core.getText();
             state.documentVersion++; state.notifyChange();
-            editor.getText().append("\n从一个想法，开始。\n"); editor.sync(true); editor.setSelection(0); editor.scrollTo(0, 0);
+            if (!javaMode && !markdownMode) {
+                editor.getText().append("\n从一个想法，开始。\n"); editor.sync(true);
+            }
+            editor.setSelection(0); editor.scrollTo(0, 0);
             if ("true".equals(arguments.getString("search"))) {
                 activity.findViewById(R.id.search_toggle).performClick();
                 if (activity.findViewById(R.id.replace_panel).getVisibility() != android.view.View.VISIBLE)
@@ -278,6 +287,7 @@ public final class DeviceTests extends Instrumentation {
                 ((android.view.inputmethod.InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(editor.getWindowToken(), 0);
             }
         });
+        if (markdownMode) { ui(() -> activity.findViewById(R.id.mode_preview).performClick()); Thread.sleep(600); }
         Thread.sleep(4000); waitForIdleSync();
         // Display changes can recreate the Activity while the keyboard is opening.
         if (monitor.getLastActivity() != activity) { bind((MainActivity) monitor.getLastActivity()); ready(); }
@@ -293,7 +303,7 @@ public final class DeviceTests extends Instrumentation {
         String name = arguments.getString("preview");
         screenshot(name);
         ui(() -> {
-            if (editor.getHeight() < editor.getLineHeight() + editor.getPaddingTop() + editor.getPaddingBottom())
+            if (!markdownMode && editor.getHeight() < editor.getLineHeight() + editor.getPaddingTop() + editor.getPaddingBottom())
                 throw new AssertionError("正文高度不足：" + editor.getHeight());
             checks++;
             if ("true".equals(arguments.getString("keyboard")))
@@ -314,4 +324,33 @@ public final class DeviceTests extends Instrumentation {
             if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)) throw new AssertionError("截图写入失败");
         } finally { bitmap.recycle(); }
     }
+
+    private static final String JAVA_SAMPLE = "package demo;\n\n"
+            + "import java.util.List;\n\n"
+            + "/** 语法高亮示例 */\n"
+            + "public class 示例 {\n"
+            + "    // 行注释\n"
+            + "    private static final int VALUE = 42;\n"
+            + "    private String text = \"中文字符串\";\n\n"
+            + "    /* 块注释\n"
+            + "       跨行 */\n"
+            + "    @Override\n"
+            + "    public String toString() {\n"
+            + "        return text + VALUE + 'x' + 3.14f;\n"
+            + "    }\n"
+            + "}\n";
+
+    private static final String MD_SAMPLE = "# 标题\n\n"
+            + "段落包含 **粗体**、*斜体*、`行内代码` 与 [链接](https://example.com)。\n\n"
+            + "- 项目一\n"
+            + "- 项目二\n"
+            + "  - 嵌套项目\n\n"
+            + "> 引用一行\n\n"
+            + "```java\n"
+            + "class A { int value = 1; }\n"
+            + "```\n\n"
+            + "| 列 | 值 |\n"
+            + "| --- | --- |\n"
+            + "| a | 1 |\n\n"
+            + "---\n";
 }

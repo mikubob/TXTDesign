@@ -42,9 +42,12 @@ final class EditorTheme {
         defaults.put("@componentBackground", dark ? "#192231" : "#FFFFFF");
         defaults.put("Component.borderColor", dark ? "#334155" : "#DCE3ED");
         defaults.put("Label.disabledForeground", dark ? "#A3B1C6" : "#58677F");
-        defaults.put("TextArea.background", "$TextField.background");
-        defaults.put("TextArea.selectionBackground", dark ? "#26486F" : "#DBEAFE");
-        defaults.put("TextArea.selectionForeground", "$TextArea.foreground");
+        defaults.put("TextPane.background", "$TextField.background");
+        // 只读预览也是文本面板：不用 FlatLaf 的 disabledBackground，免得和编辑区两块底色。
+        defaults.put("TextPane.inactiveBackground", "$TextPane.background");
+        defaults.put("TextPane.foreground", "@foreground");
+        defaults.put("TextPane.selectionBackground", dark ? "#26486F" : "#DBEAFE");
+        defaults.put("TextPane.selectionForeground", "$TextPane.foreground");
         defaults.put("Button.arc", "10");
         defaults.put("Component.arc", "10");
         defaults.put("TextComponent.arc", "10");

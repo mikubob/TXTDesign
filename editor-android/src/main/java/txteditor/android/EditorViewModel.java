@@ -16,13 +16,19 @@ import java.io.OutputStream;
 import java.nio.charset.CharacterCodingException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import txteditor.core.EditorModel;
 import txteditor.core.SessionSnapshot;
 import txteditor.core.TextCodec;
 import txteditor.core.TextKeys;
+import txteditor.core.text.LanguageId;
+import txteditor.core.text.md.MdDocument;
+import txteditor.core.text.md.MdParser;
 
 final class EditorViewModel extends ViewModel {
     static final int NONE = 0, NEW = 1, OPEN = 2, EXIT = 3;
+    /** 视图模式：源码编辑 / Markdown 预览。 */
+    static final int SOURCE = 0, PREVIEW = 1;
     final EditorModel core = new EditorModel();
     private final Context app;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -30,7 +36,9 @@ final class EditorViewModel extends ViewModel {
     private final File draftFile, recoveryFile;
     Runnable observer;
     boolean busy, search, saveFailed;
-    String name = "未命名.txt", uri = "", saved = "", pattern = "", replacement = "", message = "";
+    LanguageId language = LanguageId.PLAIN;
+    int viewMode = SOURCE;
+    String name = LanguageId.PLAIN.defaultFileName(), uri = "", saved = "", pattern = "", replacement = "", message = "";
     int scroll, afterSave, readyAction, documentVersion;
     private final Runnable delayedDraft = this::persist;
 
@@ -61,6 +69,8 @@ final class EditorViewModel extends ViewModel {
                             TextEdits.boundary(draft.text, Math.max(draft.selectionStart, draft.selectionEnd), true));
                     uri = restored.uri; name = draft.fileName; pattern = draft.pattern;
                     replacement = draft.replacement; search = draft.searchOpen; scroll = draft.scroll;
+                    language = LanguageId.parse(draft.language);
+                    viewMode = language == LanguageId.MARKDOWN && draft.viewMode == PREVIEW ? PREVIEW : SOURCE;
                     message = "已恢复本地草稿（编辑历史从此处重新记录）";
                 } else message = problem;
                 documentVersion++; busy = false; notifyChange();
@@ -72,7 +82,7 @@ final class EditorViewModel extends ViewModel {
 
     SessionSnapshot snapshot() {
         return new SessionSnapshot(core.getText(), saved, name, core.getSelectionStart(), core.getSelectionEnd(),
-                scroll, pattern, replacement, search);
+                scroll, pattern, replacement, search, language.name(), viewMode);
     }
 
     void edited() { main.removeCallbacks(delayedDraft); main.postDelayed(delayedDraft, 700); }
@@ -87,7 +97,7 @@ final class EditorViewModel extends ViewModel {
     }
 
     void newDocument() {
-        core.load(""); saved = ""; uri = ""; name = "未命名.txt"; scroll = 0;
+        core.load(""); saved = ""; uri = ""; name = language.defaultFileName(); scroll = 0; viewMode = SOURCE;
         documentVersion++; persist(); notifyChange();
     }
 
@@ -108,8 +118,11 @@ final class EditorViewModel extends ViewModel {
                     text = TextCodec.decodeUtf8(bytes.toByteArray());
                 }
                 String filename = displayName(target);
+                // 后缀优先，MIME 与首行兜底：SAF 对 .java/.c 常报 application/octet-stream。
+                LanguageId detected = LanguageId.detect(filename, mime(target), text);
                 main.post(() -> {
                     core.load(text); saved = text; uri = target.toString(); name = filename; scroll = 0;
+                    language = detected; viewMode = SOURCE;
                     documentVersion++; busy = false; message = "已打开 UTF-8 文本"; persist(); notifyChange();
                 });
             } catch (TooLarge error) {
@@ -144,6 +157,9 @@ final class EditorViewModel extends ViewModel {
                 String filename = displayName(target);
                 main.post(() -> {
                     core.markSaved(draft.text); saved = draft.text; uri = target.toString(); name = filename;
+                    // 另存为可能改后缀：认出新语言，没后缀时保留原语言。
+                    LanguageId byName = LanguageId.forFileName(filename);
+                    if (byName != LanguageId.PLAIN) language = byName;
                     busy = false; message = "已保存 UTF-8 文本";
                     readyAction = afterSave; afterSave = NONE;
                     persist(); io.execute(() -> DraftStore.delete(recoveryFile)); notifyChange();
@@ -155,6 +171,20 @@ final class EditorViewModel extends ViewModel {
                     persist(); notifyChange();
                 });
             }
+        });
+    }
+
+    private String mime(Uri target) {
+        try { return app.getContentResolver().getType(target); }
+        catch (RuntimeException ignored) { return null; }
+    }
+
+    /** 后台解析 Markdown 块；结果只在文档没换过时回调。 */
+    void preview(String text, Consumer<MdDocument> sink) {
+        final int version = documentVersion;
+        io.execute(() -> {
+            MdDocument document = MdParser.parse(text);
+            main.post(() -> { if (version == documentVersion) sink.accept(document); });
         });
     }
 

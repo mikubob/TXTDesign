@@ -27,7 +27,11 @@ final class TextEdits {
         return TextCodec.normalize(valid.toString());
     }
 
-    static void commit(EditorModel model, String platformText, int selectionStart, int selectionEnd) {
+    /**
+     * 把平台文本落到核心；返回 {start, oldEnd, newEnd}（UTF-16，相对替换前的文本），
+     * 供增量高亮直接使用。文本没有变化时返回 null。
+     */
+    static int[] commit(EditorModel model, String platformText, int selectionStart, int selectionEnd) {
         String next = committedText(platformText);
         String old = model.getText();
         int start = 0;
@@ -40,11 +44,16 @@ final class TextEdits {
         if (boundary(old, endOld, true) != endOld || boundary(next, endNew, true) != endNew) {
             endOld++; endNew++;
         }
-        if (!old.equals(next)) model.replace(start, endOld, next.substring(start, endNew));
+        int[] change = null;
+        if (!old.equals(next)) {
+            model.replace(start, endOld, next.substring(start, endNew));
+            change = new int[]{start, endOld, endNew};
+        }
         int rawStart = boundary(platformText, Math.min(selectionStart, selectionEnd), false);
         int rawEnd = boundary(platformText, Math.max(selectionStart, selectionEnd), true);
         int a = boundary(next, committedText(platformText.substring(0, rawStart)).length(), false);
         int b = boundary(next, committedText(platformText.substring(0, rawEnd)).length(), true);
         model.setSelection(a, b);
+        return change;
     }
 }

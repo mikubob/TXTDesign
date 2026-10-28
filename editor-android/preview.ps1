@@ -7,6 +7,8 @@ $adb = Join-Path $Sdk 'platform-tools\adb.exe'
 $previews = Join-Path $PSScriptRoot 'previews'
 New-Item -ItemType Directory -Force $previews | Out-Null
 function Run-Adb([string[]]$Arguments) {
+    # adb pull 把 "1 file pulled" 写到 stderr，Stop 模式会当致命错误；真实失败靠退出码判断。
+    $ErrorActionPreference = 'Continue'
     & $adb -s $Serial @Arguments
     if ($LASTEXITCODE -ne 0) { throw "ADB 失败：$Arguments" }
 }
@@ -36,6 +38,8 @@ try {
     foreach ($name in @('file-menu', 'leave-dialog')) {
         Run-Adb @('pull', "/sdcard/Android/data/txteditor.android/files/previews/$name.png", (Join-Path $previews "$name.png"))
     }
+    Capture 'java'
+    Capture 'markdown'
     Capture 'search' 'true'
     Capture 'keyboard' 'true' 'true'
     Run-Adb @('shell', 'cmd', 'uimode', 'night', 'yes')
@@ -45,8 +49,12 @@ try {
     Capture 'landscape-keyboard' 'true' 'true'
     Run-Adb @('shell', 'wm', 'size', '840x1491')
     Capture 'small-landscape' 'true' 'true'
+    # 840x1491 在 640dpi 上只有 210dp 宽：配 1.5 倍字体专门盯标题栏不被副标题撑成一列。
     Run-Adb @('shell', 'settings', 'put', 'system', 'user_rotation', '0')
     Run-Adb @('shell', 'settings', 'put', 'system', 'font_scale', '1.5')
+    Capture 'narrow-large-type'
+    # 大字号还要在正常宽度下验证一次（字体仍是 1.5）。
+    Run-Adb @('shell', 'wm', 'size', $(if ($override) { $override } else { 'reset' }))
     Capture 'large-type'
     Capture 'large-type-search' 'true' 'true'
 } finally {

@@ -13,7 +13,7 @@ java -jar .\build\txteditor-windows.jar
 
 也可双击 `run.cmd`。最终 JAR 已包含共享核心、FlatLaf 类、资源、原生库和 Apache-2.0 许可；复制单个 JAR 到有 Java 的电脑即可启动，无需配置第三方 classpath。原生库正常由 FlatLaf 解压到临时目录；有执行限制的机器可能无法使用原生窗口装饰，见官方[原生库分发说明](https://www.formdev.com/flatlaf/native-libraries/)。
 
-[GitHub Releases](https://github.com/mikubob/TXTDesign/releases/latest) 另提供 Windows x64 EXE 安装器，自带 Temurin Java 21，无需另装 Java。安装器按当前用户安装，支持开始菜单和桌面快捷方式。源码打包需 Temurin JDK 21 x64 与 WiX 3.14.1 均在 PATH，执行 `powershell -ExecutionPolicy Bypass -File .\package.ps1 -Version 1.2.0`；输出 `build/installer/TXTDesign-1.2.0.exe`。安装器尚未使用商业代码签名证书。捆绑运行时只含 `java.desktop` 与 `java.logging` 两个模块——应用只用 UTF-8，不需要字符集与本地化数据模块，安装包因此约为 28 MB。
+[GitHub Releases](https://github.com/mikubob/TXTDesign/releases/latest) 另提供 Windows x64 EXE 安装器，自带 Temurin Java 21，无需另装 Java。安装器按当前用户安装，支持开始菜单和桌面快捷方式。源码打包需 Temurin JDK 21 x64 与 WiX 3.14.1 均在 PATH，执行 `powershell -ExecutionPolicy Bypass -File .\package.ps1 -Version 1.3.0`；输出 `build/installer/TXTDesign-1.3.0.exe`。安装器尚未使用商业代码签名证书。捆绑运行时只含 `java.desktop` 与 `java.logging` 两个模块——应用只用 UTF-8，不需要字符集与本地化数据模块，安装包因此约为 28 MB。
 
 ## 界面与操作
 

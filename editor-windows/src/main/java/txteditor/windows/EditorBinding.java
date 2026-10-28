@@ -2,14 +2,19 @@ package txteditor.windows;
 
 import txteditor.core.EditorModel;
 import txteditor.core.TextCodec;
-import javax.swing.JTextArea;
+import txteditor.core.text.LanguageId;
+import javax.swing.JTextPane;
 import javax.swing.SwingUtilities;
 import javax.swing.text.AbstractDocument;
 import javax.swing.text.AttributeSet;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DocumentFilter;
 import javax.swing.text.Element;
+import javax.swing.text.Style;
 import javax.swing.text.StyleConstants;
+import javax.swing.text.StyleContext;
+import javax.swing.text.StyledDocument;
+import java.awt.Font;
 import java.awt.Toolkit;
 import java.awt.event.InputMethodEvent;
 import java.awt.event.InputMethodListener;
@@ -17,16 +22,18 @@ import java.util.function.Consumer;
 
 /** The widget owns composition/display; committed edits always enter the shared model. */
 final class EditorBinding extends DocumentFilter {
-    final JTextArea area;
+    final JTextPane area;
     final EditorModel model;
+    final SyntaxPainter painter;
     private final Runnable changed;
     private final Consumer<String> error;
     private boolean writing;
     private boolean composing;
     private boolean grouping;
 
-    EditorBinding(JTextArea area, EditorModel model, Runnable changed, Consumer<String> error) {
+    EditorBinding(JTextPane area, EditorModel model, Runnable changed, Consumer<String> error) {
         this.area = area; this.model = model; this.changed = changed; this.error = error;
+        this.painter = new SyntaxPainter(area, false);
         ((AbstractDocument) area.getDocument()).setDocumentFilter(this);
         area.addCaretListener(event -> {
             if (writing || composing) return;
@@ -38,6 +45,7 @@ final class EditorBinding extends DocumentFilter {
                 if (start != area.getSelectionStart() || end != area.getSelectionEnd()) syncSelection();
             }
             changed.run();
+            painter.schedule(); // 滚动/光标移动后可视行可能变了
         });
         area.addInputMethodListener(new InputMethodListener() {
             public void inputMethodTextChanged(InputMethodEvent e) {
@@ -78,6 +86,7 @@ final class EditorBinding extends DocumentFilter {
             writing = true;
             try { fb.replace(start, end - start, normalized, attrs); }
             finally { writing = false; }
+            painter.edited(start, end, start + normalized.length());
             // DefaultCaret's requested offset can bisect a pair after expanded deletion.
             SwingUtilities.invokeLater(() -> { if (!composing) syncSelection(); });
             changed.run();
@@ -108,7 +117,7 @@ final class EditorBinding extends DocumentFilter {
 
     private void flushComposition() {
         if (!composing) return;
-        String old = model.getText(), now = area.getText();
+        String old = model.getText(), now = SyntaxPainter.text(area);
         int start = 0;
         while (start < old.length() && start < now.length() && old.charAt(start) == now.charAt(start)) start++;
         while (!model.isBoundary(start)) start--;
@@ -135,10 +144,27 @@ final class EditorBinding extends DocumentFilter {
 
     void refresh() {
         writing = true;
-        try { area.setText(model.getText()); syncSelection(); }
-        finally { writing = false; }
+        try {
+            String text = model.getText();
+            area.setText(text);
+            painter.load(text);
+            syncSelection();
+        } finally { writing = false; }
         changed.run();
     }
+
+    /** 字号只走文档默认样式：token 样式仅设颜色/字重，正文随默认字号整篇缩放。 */
+    void setFontSize(Font font) {
+        area.setFont(font);
+        Style base = ((StyledDocument) area.getDocument()).getStyle(StyleContext.DEFAULT_STYLE);
+        if (base != null) {
+            StyleConstants.setFontFamily(base, font.getFamily());
+            StyleConstants.setFontSize(base, font.getSize());
+        }
+        painter.schedule();
+    }
+
+    void setLanguage(LanguageId language) { painter.setLanguage(language); }
 
     void syncSelection() {
         writing = true;

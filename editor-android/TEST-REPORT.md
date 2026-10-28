@@ -8,8 +8,8 @@
 - 标准 Gradle Wrapper 8.11.1（官方 SHA-256 校验）、AGP 8.9.2；compileSdk 35 revision 2、Build Tools 36.0.0、targetSdk 35、minSdk 26、Java 8 字节码。
 - Material 1.12.0、AppCompat 1.7.0、Lifecycle ViewModel 2.8.7。构建不再调用旧的手工 AAPT2/javac/D8 拼装链路或 libs JAR。
 - 测试实例：Medium Phone API 37.0，Android 17，x86_64，软件图形渲染；1080×2400、420 dpi。未连接实体手机。
-- APK：[build/txteditor-android.apk](build/txteditor-android.apk)，**1,633,070 字节**（R8 混淆与资源裁剪后），包名 txteditor.android，versionCode 3 / versionName 1.2。
-- APK SHA-256：`701334C2D10F30F5349260D936E8ECCA19D2D9DEB6F960A497B39A0F14160398`。
+- APK：[build/txteditor-android.apk](build/txteditor-android.apk)，**1,651,438 字节**（R8 混淆与资源裁剪后），包名 txteditor.android，versionCode 4 / versionName 1.3。
+- APK SHA-256：`DB0FC344D22E561EA761BEA88889DE477985039E6D709A7D0748212F5D41A945`。
 - 签名证书 SHA-256：`F478EB230EE017DAF791045DAC50B665BB0859DF444EAB3F053B1581FE0E3D8B`，与原 build/debug.keystore 相同。apksigner v2 校验通过；主/测试 APK 均以 adb install -r 安装成功。没有卸载应用或清除用户数据。
 - 原调试证书已迁移至 signing/debug.keystore，避免 Gradle clean 删除证书；请单独备份。测试只覆盖测试模拟器的演示文档与草稿。
 
@@ -23,7 +23,7 @@ powershell -ExecutionPolicy Bypass -File .\editor-android\device-test.ps1 -Seria
 powershell -ExecutionPolicy Bypass -File .\editor-android\preview.ps1 -Serial emulator-5554
 ```
 
-主 APK、独立测试 APK、签名校验通过。现有固定种子 JVM 自检通过：**AdapterTest passed: 5576 checks (seed 1949)**，包含 2,000 步随机输入/删除/替换、逐步撤销重做、中文/代理项边界、KMP、草稿序列化与未知版本拒绝。调用的是真实共享核心源码。
+主 APK、独立测试 APK、签名校验通过。现有固定种子 JVM 自检通过：**AdapterTest passed: 7620 checks (seed 1949)**，包含 2,000 步随机输入/删除/替换、逐步撤销重做、中文/代理项边界、KMP、草稿序列化与未知版本拒绝。调用的是真实共享核心源码。
 
 依赖缓存后，标准 Wrapper 的 `--offline assembleDebug adapterCheck` 也实际通过。完整构建与设备日志：[build/final-device-run.txt](build/final-device-run.txt)；离线日志：[build/offline-build.txt](build/offline-build.txt)。
 
@@ -79,3 +79,13 @@ MainActivity 使用 AppCompat 自身的 ViewModelStore 与 OnBackPressedDispatch
 - 未计时 1 千/1 万/10 万文档的完整 UI 响应；不把核心算法复杂度当作界面性能结果。
 - SAF 不保证原子覆盖。失败时原文件可能部分写入；应用保留编辑内容和覆盖前成功落盘的私有恢复副本，供另存为重试。
 - 草稿空闲 700 ms 后落盘，正常后台立即安排写入；写入前断电或强杀仍可能丢失最近输入。卸载会清除草稿与恢复副本；本次未执行卸载。
+
+## v1.3 多语言高亮与 Markdown 预览（2026-10-29）
+
+在 MuMu 模拟器（Android 15，1440×2560，x86_64，暴露为 `emulator-5554`）上复跑：
+
+- `device-test.ps1`：`assembleRelease` + `adapterCheck` + `lintDebug` + 两轮 instrument，**81 + 5 checks PASS**，退出码 0。
+- `preview.ps1`：11 组场景截图全部 PASS（light / dark / search / keyboard / landscape / small-landscape / narrow-large-type / large-type / java / markdown / file-menu）。
+- [previews/java.png](previews/java.png)：关键字、类型、字符串、行 / 块注释与注解分色，标题显示「示例.java · Java」。
+- [previews/markdown.png](previews/markdown.png)：标题、粗斜体、行内代码、链接、嵌套列表、引用、代码块（块内仍保留 Java 高亮）、表格与分割线；顶部「源码 / 预览」切换正常。
+- [previews/narrow-large-type.png](previews/narrow-large-type.png)：210 dp 宽 + 1.5 倍字体下标题栏仍为单行、正文可见；该用例固定住「副标题竖排撑爆标题栏」的回归。

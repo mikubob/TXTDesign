@@ -10,6 +10,8 @@ if (!$Sdk) { $Sdk = $env:ANDROID_SDK_ROOT }
 if (!$Sdk) { $Sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
 if (!$env:JAVA_HOME) { throw '请将 JAVA_HOME 指向 JDK 17 或 21，参见 README.md。' }
 function Run([string]$command, [string[]]$arguments) {
+    # javac / gradle 把 "-source 8 已过时" 这类警告写到 stderr，Stop 模式会把它当致命错误；真实失败靠退出码判断。
+    $ErrorActionPreference = 'Continue'
     & $command @arguments
     if ($LASTEXITCODE -ne 0) { throw "命令失败 ($LASTEXITCODE): $command" }
 }

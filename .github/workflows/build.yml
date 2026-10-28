@@ -40,7 +40,7 @@ jobs:
       - name: Build and check Windows installer
         shell: pwsh
         run: |
-          $version = '1.2.0'
+          $version = '1.3.0'
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME.TrimStart('v') }
           ./editor-windows/package.ps1 -Version $version
       - name: Collect packages and checksums

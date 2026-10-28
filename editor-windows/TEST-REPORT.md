@@ -137,3 +137,9 @@ Robot 桌面截图另存为 `build/windows-screen-attempt.png` 和 `build/window
 4. 新文档保存时取消选择器；已有文件另存为时取消覆盖；新建/打开/关闭分别选择取消。文件内容和修改标记应保留。
 5. 在真实权限受限目录或锁定文件上保存，记录错误与恢复路径，再另存到正常目录核对内容；不要用唯一重要文件做失败演示。
 6. 安卓任务在真机上用同一操作序列对照文本、选区和历史。本任务没有安卓 SDK/真机验收结论。
+
+## v1.3 高亮与 Markdown 预览回归（2026-10-29）
+
+- CoreTest 48,482 项、TextTest 3,679 项（含 3,600 步随机编辑的增量 == 全量逐 token 对照）、DesktopTest 115 项、GuiTest 633 项（`-Dflatlaf.uiScale=1.25`）全部 PASS。
+- 真实窗口截图：[build/preview-java.png](build/preview-java.png) 显示 Java 高亮与状态栏 `Java | UTF-8/LF`；[build/preview-markdown-dark.png](build/preview-markdown-dark.png) 为深色块级预览，右上角有「返回源码」。
+- `build.ps1` / `package.ps1` 改为「外部程序只看退出码」，修掉 Windows PowerShell 5.1 把 javac 的「源 8 已过时」警告升级成致命错误、导致本地构建与打包直接中断的问题；打包不再依赖删除依赖清单，改由 `jar cfm -m` 覆盖。

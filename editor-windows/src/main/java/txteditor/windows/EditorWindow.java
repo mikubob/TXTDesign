@@ -3,10 +3,12 @@ package txteditor.windows;
 import txteditor.core.EditorModel;
 import txteditor.core.SessionSnapshot;
 import txteditor.core.TextKeys;
+import txteditor.core.text.LanguageId;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.util.UIScale;
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.text.Element;
 import javax.swing.text.JTextComponent;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
@@ -19,7 +21,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -29,17 +33,27 @@ public final class EditorWindow extends JFrame {
     private static final int RECENT_LIMIT = 5;
     private static Properties cachedPrefs;
     final EditorModel model = new EditorModel();
-    final JTextArea area = new JTextArea();
+    /**
+     * JTextPane 默认不折行；视口宽度跟随即恢复原来 setLineWrap(true) 的效果。
+     * shortcut: 折行按字符而非单词（JTextPane 没有 setWrapStyleWord），等有人抱怨断词再写 View。
+     */
+    final JTextPane area = new JTextPane() {
+        @Override public boolean getScrollableTracksViewportWidth() { return true; }
+    };
+    final MarkdownPreview preview = new MarkdownPreview();
     final JTextField query = new JTextField(14);
     final JTextField replacement = new JTextField(14);
     final JLabel status = new JLabel(" ");
     final JPanel searchPanel = new JPanel(new BorderLayout(0, 8));
+    LanguageId language = LanguageId.PLAIN;
+    boolean previewMode;
     private final JPanel replaceRow = new JPanel(new BorderLayout(10, 0));
     private final JLabel documentName = new JLabel(), documentPath = new JLabel(), savedState = new JLabel();
     private final JLabel searchResult = new JLabel("区分大小写 · 按字面查找 · 末尾自动回绕");
     private final JLabel position = new JLabel();
     private final JButton zoomLabel = new JButton("100%");
     private final JMenu recentMenu = new JMenu("最近文件");
+    private final Map<LanguageId, JRadioButtonMenuItem> languageItems = new EnumMap<LanguageId, JRadioButtonMenuItem>(LanguageId.class);
     private final List<Path> recent = new ArrayList<Path>();
     private final Properties prefs;
     private final Timer sessionTimer = new Timer(700, event -> persistSession());
@@ -47,9 +61,12 @@ public final class EditorWindow extends JFrame {
     final JPanel searchDock = surface(new JPanel(new BorderLayout()));
     final EditorBinding binding;
     private final JScrollPane scroll;
+    private final CardLayout cards = new CardLayout();
+    private final JPanel stage = new JPanel(cards);
     private final List<Action> actions = new ArrayList<Action>();
     private final List<JComponent> searchControls = new ArrayList<JComponent>();
-    private Action undoAction, redoAction, nextAction, replaceAction, zoomInAction, zoomOutAction, themeAction;
+    private Action undoAction, redoAction, nextAction, replaceAction, zoomInAction, zoomOutAction, themeAction, previewAction;
+    private JToggleButton previewToggle;
     private JRadioButtonMenuItem themeSystem, themeLight, themeDark;
     private JButton searchToggle;
     private JPanel heading, fileHeader, shell, footer;
@@ -74,8 +91,8 @@ public final class EditorWindow extends JFrame {
         else { setSize(saved.width, saved.height); setLocation(saved.x, saved.y); }
         area.setFont(javax.swing.text.StyleContext.getDefaultStyleContext()
                 .getFont("Microsoft YaHei UI", Font.PLAIN, 18).deriveFont(UIScale.scale(18f)));
-        area.setMargin(new Insets(22, 26, 22, 26));
-        area.setLineWrap(true); area.setWrapStyleWord(true);
+        // JTextPane 没有 setMargin；边框留白等效，BasicTextUI 用 getInsets() 排版正文。
+        area.setBorder(BorderFactory.createEmptyBorder(22, 26, 22, 26));
         area.getAccessibleContext().setAccessibleName("纯文本编辑区");
         query.getAccessibleContext().setAccessibleName("查找词，区分大小写");
         replacement.getAccessibleContext().setAccessibleName("替换文本");
@@ -111,6 +128,19 @@ public final class EditorWindow extends JFrame {
         zoomInAction = addAction(view, "放大", "control EQUALS", () -> setZoom(zoom + 10));
         zoomOutAction = addAction(view, "缩小", "control MINUS", () -> setZoom(zoom - 10));
         Action resetZoom = addAction(view, "重置缩放", "control 0", () -> setZoom(100));
+        view.addSeparator();
+        previewAction = addAction(view, "预览 Markdown", "control E", () -> setPreview(!previewMode));
+        view.addSeparator();
+        JMenu languageMenu = new JMenu("语言");
+        ButtonGroup languageGroup = new ButtonGroup();
+        for (LanguageId id : LanguageId.values()) {
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(id.title);
+            item.setSelected(id == language);
+            item.addActionListener(event -> { if (!busy) adoptLanguage(id); });
+            languageGroup.add(item); languageMenu.add(item);
+            languageItems.put(id, item);
+        }
+        view.add(languageMenu);
         themeAction = action("主题：跟随系统", null, this::cycleTheme);
         menus.add(files); menus.add(edit); menus.add(searchMenu); menus.add(view); setJMenuBar(menus);
 
@@ -139,6 +169,12 @@ public final class EditorWindow extends JFrame {
         toolbar.add(Box.createHorizontalStrut(12));
         toolbar.add(button(undoAction, UNDO, true)); toolbar.add(Box.createHorizontalStrut(4));
         toolbar.add(button(redoAction, REDO, true)); toolbar.add(Box.createHorizontalGlue());
+        previewToggle = new JToggleButton(previewAction);
+        previewToggle.setText("预览");
+        previewToggle.setToolTipText("预览 Markdown（Ctrl+E）");
+        previewToggle.getAccessibleContext().setAccessibleName("预览 Markdown");
+        previewToggle.getAccessibleContext().setAccessibleDescription("在源码与 Markdown 预览之间切换");
+        toolbar.add(previewToggle); toolbar.add(Box.createHorizontalStrut(6));
         JButton searchButton = button(showReplace, SEARCH, false); searchButton.setText("查找 / 替换");
         searchToggle = searchButton;
         toolbar.add(searchButton); top.add(toolbar, BorderLayout.SOUTH); shell.add(top, BorderLayout.NORTH);
@@ -179,8 +215,20 @@ public final class EditorWindow extends JFrame {
             }
         };
         scroll.setBorder(BorderFactory.createEmptyBorder());
+        // 滚动时补色：SyntaxPainter 自己判断可视区是否已覆盖，重复调用是廉价的。
+        scroll.getVerticalScrollBar().addAdjustmentListener(event -> binding.painter.schedule());
+        JScrollPane previewScroll = new JScrollPane(preview.pane()) {
+            @Override protected void processMouseWheelEvent(MouseWheelEvent event) {
+                if (event.isControlDown()) { setZoom(zoom - event.getWheelRotation() * 10); event.consume(); }
+                else super.processMouseWheelEvent(event);
+            }
+        };
+        previewScroll.setBorder(BorderFactory.createEmptyBorder());
+        previewScroll.getVerticalScrollBar().setUnitIncrement(UIScale.scale(24));
+        stage.add(scroll, "source");
+        stage.add(previewScroll, "preview");
         JPanel body = new JPanel(new BorderLayout());
-        body.add(scroll, BorderLayout.CENTER); body.add(searchDock, BorderLayout.EAST);
+        body.add(stage, BorderLayout.CENTER); body.add(searchDock, BorderLayout.EAST);
         document.add(body, BorderLayout.CENTER); shell.add(document, BorderLayout.CENTER);
         footer = new JPanel(new BorderLayout(12, 0));
         footer.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
@@ -383,6 +431,8 @@ public final class EditorWindow extends JFrame {
         themeDark.setSelected("dark".equals(themeMode));
         themeAction.putValue(Action.NAME, "主题：" + themeName(themeMode));
         prefs.setProperty("theme", themeMode);
+        binding.painter.applyTheme(FlatLaf.isLafDark());
+        if (previewMode) preview.render(model.getText(), FlatLaf.isLafDark());
     }
 
     private void cycleTheme() {
@@ -400,9 +450,36 @@ public final class EditorWindow extends JFrame {
 
     private void setZoom(int value) {
         zoom = Math.max(70, Math.min(200, value));
-        area.setFont(area.getFont().deriveFont(UIScale.scale(18f) * zoom / 100)); zoomLabel.setText(zoom + "%");
+        float size = UIScale.scale(18f) * zoom / 100;
+        binding.setFontSize(area.getFont().deriveFont(size));
+        zoomLabel.setText(zoom + "%");
         if (zoomInAction != null) zoomInAction.setEnabled(!busy && zoom < 200);
         if (zoomOutAction != null) zoomOutAction.setEnabled(!busy && zoom > 70);
+    }
+
+    /** 源码 / 预览切换；两侧文档互不影响，所以光标、选区与滚动位置天然保留。 */
+    private void setPreview(boolean on) {
+        if (on && language != LanguageId.MARKDOWN) { updateState(); return; }
+        binding.finishInput();
+        previewMode = on;
+        if (on) { preview.render(model.getText(), FlatLaf.isLafDark()); cards.show(stage, "preview"); preview.pane().requestFocusInWindow(); }
+        else { cards.show(stage, "source"); area.requestFocusInWindow(); }
+        previewToggle.setSelected(on);
+        previewAction.putValue(Action.NAME, on ? "返回源码" : "预览 Markdown");
+        preview.pane().getAccessibleContext().setAccessibleDescription(on ? "预览已展开" : "预览已收起");
+        updateState();
+    }
+
+    /** 识别到新语言：只在真的变了时才通知高亮器，避免打开文件时白扫一遍旧文本。 */
+    private void adoptLanguage(LanguageId next) {
+        if (next == null) next = LanguageId.PLAIN;
+        if (next != language) {
+            language = next;
+            binding.setLanguage(next);
+        }
+        languageItems.get(next).setSelected(true);
+        if (previewMode && next != LanguageId.MARKDOWN) setPreview(false);
+        updateState();
     }
 
     private JTextComponent focusedText() {
@@ -451,15 +528,32 @@ public final class EditorWindow extends JFrame {
         else if (answer == 1) next.run();
     }
 
-    private JFileChooser chooser() {
+    /** 三个过滤器覆盖源码 / Markdown / 纯文本，另外保留“所有文件”；按当前语言预选。 */
+    static JFileChooser chooser(Path selected, String defaultName) {
         JFileChooser chooser = new JFileChooser();
-        chooser.setFileFilter(new FileNameExtensionFilter("UTF-8 文本 (*.txt)", "txt"));
-        if (file != null) chooser.setSelectedFile(file.toFile());
+        FileNameExtensionFilter source = new FileNameExtensionFilter("源代码 (*.java, *.c, *.h, *.cpp, *.json, *.xml)",
+                "java", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "json", "xml", "html", "htm", "xhtml", "svg");
+        FileNameExtensionFilter markdown = new FileNameExtensionFilter("Markdown (*.md, *.markdown)", "md", "markdown", "mdown");
+        FileNameExtensionFilter plain = new FileNameExtensionFilter("纯文本 (*.txt, *.log, *.ini, *.properties)",
+                "txt", "text", "log", "ini", "properties", "csv");
+        chooser.addChoosableFileFilter(source);
+        chooser.addChoosableFileFilter(markdown);
+        chooser.addChoosableFileFilter(plain);
+        chooser.setAcceptAllFileFilterUsed(true);
+        String name = defaultName != null ? defaultName : selected != null && selected.getFileName() != null
+                ? selected.getFileName().toString() : "";
+        switch (LanguageId.forFileName(name)) {
+            case MARKDOWN: chooser.setFileFilter(markdown); break;
+            case PLAIN: chooser.setFileFilter(plain); break;
+            default: chooser.setFileFilter(source); break;
+        }
+        if (selected != null) chooser.setSelectedFile(selected.toFile());
+        else if (defaultName != null) chooser.setSelectedFile(new File(defaultName));
         return chooser;
     }
 
     private void chooseOpen() {
-        JFileChooser chooser = chooser();
+        JFileChooser chooser = chooser(file, null);
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
         openPath(chooser.getSelectedFile().toPath().toAbsolutePath());
     }
@@ -478,6 +572,8 @@ public final class EditorWindow extends JFrame {
                     file = chosen; readOnly = EditorStore.tooLarge(size);
                     fileModified = EditorStore.modifiedTime(chosen); fileSize = size;
                     addRecent(chosen); EditorStore.clearSession(); restored = false;
+                    adoptLanguage(detectLanguage(chosen, text));
+                    if (previewMode) preview.render(text, FlatLaf.isLafDark());
                     binding.refresh(); area.setCaretPosition(0);
                     success = true;
                 } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); showError("打开被中断；原内容保留。"); }
@@ -491,9 +587,21 @@ public final class EditorWindow extends JFrame {
         }.execute();
     }
 
+    /** 后缀优先，MIME 与首行只作补充（设计 §5.1）。 */
+    private static LanguageId detectLanguage(Path path, String text) {
+        String name = path.getFileName() == null ? null : path.getFileName().toString();
+        String mime = null;
+        try { mime = Files.probeContentType(path); }
+        catch (IOException | RuntimeException unavailable) { }
+        String head = text.length() > 1024 ? text.substring(0, 1024) : text;
+        return LanguageId.detect(name, mime, head);
+    }
+
     private void newDocument() {
         model.load(""); binding.endGroup();
         file = null; readOnly = false; restored = false;
+        adoptLanguage(LanguageId.PLAIN);
+        setPreview(false);
         area.setEditable(!busy);
         EditorStore.clearSession(); binding.refresh(); area.requestFocusInWindow();
     }
@@ -503,7 +611,7 @@ public final class EditorWindow extends JFrame {
         binding.finishInput();
         Path target = file;
         if (saveAs || target == null) {
-            JFileChooser chooser = chooser();
+            JFileChooser chooser = chooser(target, target == null ? language.defaultFileName() : null);
             if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
             target = chooser.getSelectedFile().toPath().toAbsolutePath();
             if (Files.exists(target) && JOptionPane.showConfirmDialog(this, "覆盖已有文件？\n" + target,
@@ -526,6 +634,7 @@ public final class EditorWindow extends JFrame {
                     get(); file = chosen; readOnly = false;
                     fileModified = EditorStore.modifiedTime(chosen); fileSize = EditorStore.size(chosen);
                     model.markSaved(snapshot); EditorStore.clearSession(); addRecent(chosen); success = true;
+                    adoptLanguage(LanguageId.forFileName(chosen.getFileName() == null ? null : chosen.getFileName().toString()));
                 } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); showError("保存被中断；请检查目标文件后再次保存。"); }
                 catch (ExecutionException failed) { saveFailed(fileError(failed.getCause())); }
                 finally { setBusy(false); }
@@ -599,7 +708,8 @@ public final class EditorWindow extends JFrame {
         int length = model.length();
         return new SessionSnapshot(model.getText(), model.getSavedText(), file == null ? null : file.toString(),
                 Math.min(model.getSelectionStart(), length), Math.min(model.getSelectionEnd(), length),
-                scroll.getVerticalScrollBar().getValue(), query.getText(), replacement.getText(), searchPanel.isVisible());
+                scroll.getVerticalScrollBar().getValue(), query.getText(), replacement.getText(), searchPanel.isVisible(),
+                language.name(), previewMode ? 1 : 0);
     }
 
     /** 编辑后 700ms 防抖落盘；未修改的文档不写草稿。 */
@@ -631,7 +741,9 @@ public final class EditorWindow extends JFrame {
         query.setText(snapshot.pattern == null ? "" : snapshot.pattern);
         replacement.setText(snapshot.replacement == null ? "" : snapshot.replacement);
         if (snapshot.searchOpen) showSearch(!replacement.getText().isEmpty());
+        adoptLanguage(LanguageId.parse(snapshot.language));
         binding.refresh();
+        if (snapshot.viewMode == 1 && language == LanguageId.MARKDOWN) setPreview(true);
         restored = true;
         final int offset = snapshot.scroll;
         SwingUtilities.invokeLater(() -> scroll.getVerticalScrollBar().setValue(offset));
@@ -676,13 +788,19 @@ public final class EditorWindow extends JFrame {
         documentPath.setToolTipText(file == null ? "尚未保存到文件" : file.toString());
         savedState.setText(readOnly ? "只读" : busy ? "文件处理中…" : model.isModified() ? "● 未保存" : file == null ? "新文档" : "已保存");
         status.setText((restored ? "已恢复上次会话  |  " : "") + (busy ? "文件处理中…  " : "")
-                + model.getCodePointCount() + " 个码点  |  " + model.getLineCount() + " 行  |  UTF-8 / LF");
+                + model.getCodePointCount() + " 个码点  |  " + model.getLineCount() + " 行  |  "
+                + language.title + "  |  UTF-8 / LF");
         try {
-            int caret = area.getCaretPosition(), line = area.getLineOfOffset(caret);
-            position.setText("第 " + (line + 1) + " 行 : " + (caret - area.getLineStartOffset(line) + 1) + " 列");
-        } catch (javax.swing.text.BadLocationException invalid) { position.setText(" "); }
+            int caret = area.getCaretPosition();
+            Element root = area.getDocument().getDefaultRootElement();
+            int line = root.getElementIndex(caret);
+            position.setText("第 " + (line + 1) + " 行 : " + (caret - root.getElement(line).getStartOffset() + 1) + " 列");
+        } catch (RuntimeException invalid) { position.setText(" "); }
         if (undoAction != null) undoAction.setEnabled(!busy && model.canUndo());
         if (redoAction != null) redoAction.setEnabled(!busy && model.canRedo());
+        if (previewAction != null) previewAction.setEnabled(!busy && language == LanguageId.MARKDOWN);
+        if (previewToggle != null) previewToggle.setEnabled(!busy && language == LanguageId.MARKDOWN);
+        for (JRadioButtonMenuItem item : languageItems.values()) item.setEnabled(!busy);
         if (nextAction != null) {
             nextAction.setEnabled(!busy && !query.getText().isEmpty());
             replaceAction.setEnabled(!busy && !readOnly && !query.getText().isEmpty());
