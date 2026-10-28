@@ -1,0 +1,52 @@
+plugins { id 'com.android.application' version '8.9.2' }
+
+android {
+    namespace 'txteditor.android'
+    compileSdk 35
+    buildToolsVersion '36.0.0'
+    defaultConfig {
+        applicationId 'txteditor.android'
+        minSdk 26
+        targetSdk 35
+        versionCode 2
+        versionName '1.1'
+        testApplicationId 'txteditor.android.tests'
+        testInstrumentationRunner 'txteditor.android.DeviceTests'
+    }
+    signingConfigs {
+        debug {
+            storeFile file('signing/debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+    sourceSets.main.java.srcDir '../editor-core/src/main/java'
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel:2.8.7'
+}
+
+// Keep the existing deterministic JVM checks runnable without Android stubs.
+tasks.register('compileAdapterCheck', JavaCompile) {
+    source fileTree('../editor-core/src/main/java'),
+            files('src/main/java/txteditor/android/TextEdits.java', 'src/main/java/txteditor/android/Draft.java'),
+            fileTree('src/test/java')
+    classpath = files()
+    destinationDirectory = layout.buildDirectory.dir('adapter-check')
+    options.encoding = 'UTF-8'
+    options.release = 8
+}
+tasks.register('adapterCheck', JavaExec) {
+    dependsOn 'compileAdapterCheck'
+    classpath = files(layout.buildDirectory.dir('adapter-check'))
+    mainClass = 'txteditor.android.AdapterTest'
+    enableAssertions = true
+}

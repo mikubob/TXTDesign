@@ -1,0 +1,21 @@
+# Build output and machine-local state
+**/build/
+**/.gradle/
+**/local.properties
+**/.idea/
+*.iml
+/.tools/
+/dist/
+/.artifacts/
+/.vscode/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Signing material must stay on the build machine
+*.keystore
+*.jks
+*.p12
+*.pfx
+.env
+.env.*

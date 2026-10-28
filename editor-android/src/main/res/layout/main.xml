@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar android:id="@+id/toolbar"
+        android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="64dp"
+        app:contentInsetStart="0dp" app:contentInsetEnd="0dp">
+        <LinearLayout android:id="@+id/toolbar_content" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center_vertical" android:paddingStart="20dp" android:paddingEnd="8dp" android:paddingVertical="8dp">
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:paddingEnd="8dp">
+                <TextView android:id="@+id/filename" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="@string/untitled" android:textAppearance="?attr/textAppearanceTitleMedium" android:textStyle="bold"
+                    android:textColor="?attr/colorOnSurface" android:maxLines="1" android:ellipsize="middle" />
+                <TextView android:id="@+id/subtitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/local_editor" android:textAppearance="?attr/textAppearanceLabelSmall" android:textColor="?attr/colorOnSurfaceVariant" android:layout_marginTop="2dp" />
+            </LinearLayout>
+            <com.google.android.material.button.MaterialButton android:id="@+id/save"
+                android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp" android:minWidth="80dp"
+                android:paddingHorizontal="16dp" android:text="@string/save" app:icon="@drawable/ic_save" app:iconSize="18dp" app:iconPadding="6dp" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/files" style="@style/IconButton"
+                app:icon="@drawable/ic_more" android:contentDescription="@string/more" android:tooltipText="@string/more" />
+        </LinearLayout>
+    </com.google.android.material.appbar.MaterialToolbar>
+
+    <LinearLayout android:id="@+id/edit_actions" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center_vertical" android:paddingHorizontal="12dp" android:paddingBottom="4dp">
+        <com.google.android.material.button.MaterialButton android:id="@+id/undo" style="@style/IconButton" app:icon="@drawable/ic_undo"
+            android:contentDescription="@string/undo" android:tooltipText="@string/undo" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/redo" style="@style/IconButton" app:icon="@drawable/ic_redo"
+            android:contentDescription="@string/redo" android:tooltipText="@string/redo" />
+        <View android:layout_width="1dp" android:layout_height="20dp" android:background="@color/divider" android:layout_marginHorizontal="8dp" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/search_toggle" style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp"
+            android:text="@string/search" app:icon="@drawable/ic_search" app:iconSize="20dp" />
+        <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingEnd="12dp"
+            android:text="@string/encoding" android:textAppearance="?attr/textAppearanceLabelSmall" android:textColor="?attr/colorOnSurfaceVariant" />
+    </LinearLayout>
+
+    <LinearLayout android:id="@+id/workspace" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical">
+    <ScrollView android:id="@+id/search_panel" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:visibility="gone" android:fillViewport="false" android:scrollbars="vertical">
+        <LinearLayout android:id="@+id/search_content" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingHorizontal="16dp" android:paddingBottom="12dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:text="@string/search_title" android:textAppearance="?attr/textAppearanceTitleSmall" android:textColor="?attr/colorOnSurface" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/close_search" style="@style/IconButton" app:icon="@drawable/ic_close"
+                    android:contentDescription="@string/close_search" android:tooltipText="@string/close_search" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                <com.google.android.material.textfield.TextInputLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox" android:hint="@string/pattern" app:endIconMode="clear_text"
+                    app:boxCornerRadiusTopStart="14dp" app:boxCornerRadiusTopEnd="14dp" app:boxCornerRadiusBottomStart="14dp" app:boxCornerRadiusBottomEnd="14dp">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/pattern" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:minHeight="56dp" android:singleLine="true" android:inputType="text" android:imeOptions="actionSearch|flagNoExtractUi" android:textSize="16sp" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.button.MaterialButton android:id="@+id/find_next" style="@style/SearchAction" android:layout_marginStart="8dp" android:text="@string/find_next" />
+            </LinearLayout>
+            <com.google.android.material.button.MaterialButton android:id="@+id/replace_toggle" style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp"
+                android:text="@string/show_replace" app:icon="@drawable/ic_expand" app:iconSize="20dp" />
+            <LinearLayout android:id="@+id/replace_panel" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:visibility="gone">
+                <com.google.android.material.textfield.TextInputLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox" android:hint="@string/replacement" app:endIconMode="clear_text"
+                    app:boxCornerRadiusTopStart="14dp" app:boxCornerRadiusTopEnd="14dp" app:boxCornerRadiusBottomStart="14dp" app:boxCornerRadiusBottomEnd="14dp">
+                    <com.google.android.material.textfield.TextInputEditText android:id="@+id/replacement" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:minHeight="56dp" android:singleLine="true" android:inputType="text" android:imeOptions="actionDone|flagNoExtractUi" android:textSize="16sp" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.button.MaterialButton android:id="@+id/replace_one" style="@style/SearchAction" android:layout_marginStart="8dp" android:text="@string/replace_one" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <txteditor.android.CoreEditText android:id="@+id/editor" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:layout_marginHorizontal="8dp" android:gravity="top|start" android:inputType="textMultiLine|textCapSentences" android:imeOptions="flagNoExtractUi"
+        android:scrollbars="vertical" android:overScrollMode="ifContentScrolls" android:padding="20dp" android:textSize="18sp" android:lineSpacingExtra="6dp"
+        android:textColor="?attr/colorOnSurface" android:textColorHint="?attr/colorOnSurfaceVariant" android:hint="@string/editor_hint"
+        android:background="@drawable/paper" android:fontFamily="sans" android:saveEnabled="false" />
+    </LinearLayout>
+    <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="24dp" android:paddingVertical="10dp"
+        android:textAppearance="?attr/textAppearanceLabelMedium" android:textColor="?attr/colorOnSurfaceVariant" android:accessibilityLiveRegion="polite" />
+</LinearLayout>

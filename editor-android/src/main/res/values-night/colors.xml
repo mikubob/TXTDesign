@@ -1,0 +1,14 @@
+<resources>
+    <color name="primary">#AEC6FF</color>
+    <color name="on_primary">#002D71</color>
+    <color name="primary_container">#234583</color>
+    <color name="on_primary_container">#DCE7FF</color>
+    <color name="surface">#111722</color>
+    <color name="on_surface">#E2E8F5</color>
+    <color name="surface_variant">#252E3E</color>
+    <color name="on_surface_variant">#B9C5DB</color>
+    <color name="outline">#8996AD</color>
+    <color name="paper">#181F2B</color>
+    <color name="divider">#303B4D</color>
+    <bool name="light_system_bars">false</bool>
+</resources>
