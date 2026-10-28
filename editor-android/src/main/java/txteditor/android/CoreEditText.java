@@ -47,7 +47,11 @@ public final class CoreEditText extends AppCompatEditText {
             batch = 0;
         }
         if (!finishComposition && (batch > 0 || platformBatch > 0 || BaseInputConnection.getComposingSpanStart(getText()) >= 0)) return;
-        TextEdits.commit(model, getText().toString(), getSelectionStart(), getSelectionEnd());
+        // 一次提交（含 IME 组合结束、长串输入）只产生一条历史，撤销整条还原。
+        // shortcut: 每次 sync 独立成事务，连续按键仍是逐条历史；要合并连打需等输入空闲再结束事务。
+        model.beginTransaction();
+        try { TextEdits.commit(model, getText().toString(), getSelectionStart(), getSelectionEnd()); }
+        finally { model.endTransaction(); }
         if (!model.getText().equals(getText().toString())) render();
         if (changed != null) changed.run();
     }

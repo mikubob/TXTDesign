@@ -7,6 +7,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Random;
 import txteditor.core.EditorModel;
+import txteditor.core.SessionSnapshot;
 
 public final class AdapterTest {
     private static int checks;
@@ -47,13 +48,24 @@ public final class AdapterTest {
             equal(next, model.getText());
             if (!old.equals(next)) { model.undo(); equal(old, model.getText()); model.redo(); equal(next, model.getText()); }
         }
-        Draft draft = new Draft(); draft.text = "中😀\n"; draft.saved = "以前"; draft.uri = "content://example/doc/1";
-        draft.start = 1; draft.end = 3; draft.search = true; draft.pattern = "中";
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream(); draft.write(new DataOutputStream(bytes));
-        Draft read = Draft.read(new DataInputStream(new ByteArrayInputStream(bytes.toByteArray())));
-        equal(draft.text, read.text); equal(draft.saved, read.saved); equal(draft.uri, read.uri);
-        equal(1, read.start); equal(3, read.end); equal(true, read.search);
-        try { Draft.read(new DataInputStream(new ByteArrayInputStream(new byte[]{0, 0, 0, 2}))); throw new AssertionError(); }
+        // A1：整次提交包在事务里，撤销一步回到提交前的文本与选区。
+        model.load("中文😀\nabc abc"); model.setSelection(0, 2);
+        model.beginTransaction();
+        try { TextEdits.commit(model, "新😀\nabc abc", 1, 1); }
+        finally { model.endTransaction(); }
+        equal("新😀\nabc abc", model.getText());
+        equal(true, model.undo()); equal("中文😀\nabc abc", model.getText());
+        equal(0, model.getSelectionStart()); equal(2, model.getSelectionEnd());
+        // A2：草稿字段顺序固定，往返后每个字段落在对应的 SessionSnapshot 成员上。
+        SessionSnapshot snapshot = new SessionSnapshot("中😀\n", "以前", "草稿.txt", 1, 3, 7, "中", "换", true);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        DraftFormat.write(new DataOutputStream(bytes), snapshot, "content://example/doc/1");
+        DraftFormat.Decoded read = DraftFormat.read(new DataInputStream(new ByteArrayInputStream(bytes.toByteArray())));
+        equal(snapshot.text, read.snapshot.text); equal(snapshot.savedText, read.snapshot.savedText);
+        equal("content://example/doc/1", read.uri); equal(snapshot.fileName, read.snapshot.fileName);
+        equal(1, read.snapshot.selectionStart); equal(3, read.snapshot.selectionEnd); equal(7, read.snapshot.scroll);
+        equal("中", read.snapshot.pattern); equal("换", read.snapshot.replacement); equal(true, read.snapshot.searchOpen);
+        try { DraftFormat.read(new DataInputStream(new ByteArrayInputStream(new byte[]{0, 0, 0, 2}))); throw new AssertionError(); }
         catch (IOException expected) { checks++; }
         System.out.println("AdapterTest passed: " + checks + " checks (seed 1949)");
     }

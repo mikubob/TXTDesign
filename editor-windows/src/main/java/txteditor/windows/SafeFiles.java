@@ -1,6 +1,7 @@
 package txteditor.windows;
 
 import txteditor.core.TextCodec;
+import txteditor.core.TextKeys;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -48,7 +49,7 @@ final class SafeFiles {
                 }
             }
         } catch (IOException failure) {
-            throw new IOException("保存失败；编辑内容仍在窗口中。恢复文本：" + temp
+            throw new IOException(TextKeys.of(TextKeys.SAVE_FAILED) + "恢复文本：" + temp
                     + (backup == null ? "" : "；原文件备份：" + backup) + "\n" + failure.getMessage(), failure);
         }
         // Cleanup cannot turn an already completed save into a reported failure.

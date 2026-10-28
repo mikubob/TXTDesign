@@ -1,4 +1,4 @@
-param([string]$Version = '1.1.0')
+﻿param([string]$Version = '1.2.0')
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
@@ -11,10 +11,11 @@ try {
     if (Test-Path -LiteralPath $packageRoot) { Remove-Item -LiteralPath $packageRoot -Recurse -Force }
     New-Item -ItemType Directory -Force build/package/input,build/package/image,build/installer | Out-Null
     Copy-Item build/txteditor-windows.jar build/package/input/
+    # 应用只读写 UTF-8，不需要 jdk.charsets 与 jdk.localedata，安装包因此小约 11 MB
     & jpackage --type app-image --name TXTDesign --app-version $Version `
         --vendor mikubob --description 'Offline UTF-8 text editor' `
         --input build/package/input --main-jar txteditor-windows.jar `
-        --add-modules java.desktop,java.logging,jdk.charsets,jdk.localedata `
+        --add-modules java.desktop,java.logging `
         --dest build/package/image
     if ($LASTEXITCODE -ne 0) { throw 'Windows 应用镜像打包失败' }
     $installer = Join-Path $PSScriptRoot "build/installer/TXTDesign-$Version.exe"

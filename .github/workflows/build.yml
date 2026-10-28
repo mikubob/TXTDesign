@@ -40,14 +40,14 @@ jobs:
       - name: Build and check Windows installer
         shell: pwsh
         run: |
-          $version = '1.1.0'
+          $version = '1.2.0'
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME.TrimStart('v') }
           ./editor-windows/package.ps1 -Version $version
       - name: Collect packages and checksums
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item editor-android/build/txteditor-debug.apk dist/TXTDesign-android-debug.apk
+          Copy-Item editor-android/build/txteditor-android.apk dist/TXTDesign-android.apk
           Copy-Item editor-windows/build/installer/*.exe dist/
           Copy-Item editor-windows/build/txteditor-windows.jar dist/
           Get-ChildItem dist -File | Sort-Object Name | ForEach-Object {
@@ -80,7 +80,7 @@ jobs:
           cat > release-notes.md <<'EOF'
           离线 UTF-8 文本编辑器，源码与构建说明见仓库 README。
 
-          - Android 8.0+：TXTDesign-android-debug.apk（演示用调试签名）。
+          - Android 8.0+：TXTDesign-android.apk（R8 精简，演示用调试签名）。
           - Windows x64：TXTDesign-*.exe（内含 Temurin Java 21 运行时，无需另装 Java）。
           - 已有 Java 8+：txteditor-windows.jar。
           - SHA256SUMS.txt：安装包校验值；源码下载见下方 Source code。

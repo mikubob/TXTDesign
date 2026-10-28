@@ -6,18 +6,26 @@ import java.util.Deque;
 /** Single-document model. Use on one UI thread; all offsets are UTF-16. */
 public final class EditorModel {
     public static final int HISTORY_LIMIT = 100;
+    /** 事务内两次替换间隔不超过该毫秒数才可能合并为一条历史。 */
+    public static final long MERGE_WINDOW_MILLIS = 500;
+    private static final long MERGE_WINDOW_NANOS = MERGE_WINDOW_MILLIS * 1_000_000L;
     private final GapBuffer buffer = new GapBuffer();
     private final Deque<Edit> undo = new ArrayDeque<Edit>();
     private final Deque<Edit> redo = new ArrayDeque<Edit>();
     private String savedText = "";
     private int selectionStart;
     private int selectionEnd;
+    private boolean inTransaction;
+    private Edit pending;
+    private long pendingAt;
 
     public String getText() { return buffer.toString(); }
     public int length() { return buffer.length(); }
     public int getSelectionStart() { return selectionStart; }
     public int getSelectionEnd() { return selectionEnd; }
-    public boolean canUndo() { return !undo.isEmpty(); }
+    /** 最近一次保存的文本；会话快照用它恢复未保存状态。 */
+    public String getSavedText() { return savedText; }
+    public boolean canUndo() { return !undo.isEmpty() || pending != null && !pending.removed.equals(pending.inserted); }
     public boolean canRedo() { return !redo.isEmpty(); }
     public boolean isModified() { return !savedText.contentEquals(buffer); }
     public void markSaved() { savedText = getText(); }
@@ -29,6 +37,8 @@ public final class EditorModel {
         buffer.replace(0, buffer.length(), normalized);
         undo.clear();
         redo.clear();
+        pending = null;
+        inTransaction = false;
         selectionStart = selectionEnd = 0;
         savedText = normalized;
     }
@@ -45,6 +55,19 @@ public final class EditorModel {
                 || !Character.isLowSurrogate(buffer.charAt(index)));
     }
 
+    /** Opens a merge window; every edit until endTransaction may share one undo entry. */
+    public void beginTransaction() {
+        if (inTransaction) throw new IllegalStateException("事务不能嵌套");
+        inTransaction = true;
+    }
+
+    /** Closes the window and commits whatever was merged. Safe to call when no transaction is open. */
+    public void endTransaction() {
+        if (!inTransaction) return;
+        commitPending();
+        inTransaction = false;
+    }
+
     public void replace(int start, int end, String text) {
         checkRange(start, end);
         String inserted = TextCodec.normalize(text);
@@ -53,14 +76,14 @@ public final class EditorModel {
         if (!removed.equals(inserted)) {
             Edit edit = new Edit(start, removed, inserted, selectionStart, selectionEnd, caret);
             buffer.replace(start, end, inserted);
-            undo.push(edit);
-            if (undo.size() > HISTORY_LIMIT) undo.removeLast();
             redo.clear();
+            record(edit);
         }
         selectionStart = selectionEnd = caret;
     }
 
     public boolean undo() {
+        commitPending();
         if (undo.isEmpty()) return false;
         Edit edit = undo.pop();
         buffer.replace(edit.start, edit.start + edit.inserted.length(), edit.removed);
@@ -71,6 +94,7 @@ public final class EditorModel {
     }
 
     public boolean redo() {
+        commitPending();
         if (redo.isEmpty()) return false;
         Edit edit = redo.pop();
         buffer.replace(edit.start, edit.start + edit.removed.length(), edit.inserted);
@@ -92,6 +116,44 @@ public final class EditorModel {
         int lines = 1;
         for (int i = 0; i < length(); i++) if (buffer.charAt(i) == '\n') lines++;
         return lines;
+    }
+
+    private void record(Edit edit) {
+        if (!inTransaction) { push(edit); return; }
+        if (pending == null) { pending = edit; pendingAt = System.nanoTime(); return; }
+        if (mergeable(edit)) {
+            int head = edit.start - pending.start;
+            pending = new Edit(pending.start, pending.removed,
+                    pending.inserted.substring(0, head) + edit.inserted
+                            + pending.inserted.substring(head + edit.removed.length()),
+                    pending.beforeStart, pending.beforeEnd, edit.afterCaret);
+            pendingAt = System.nanoTime();
+            return;
+        }
+        commitPending();
+        pending = edit;
+        pendingAt = System.nanoTime();
+    }
+
+    /** 相邻（落在已合并结果内）、同段落、间隔小于合并窗口。 */
+    private boolean mergeable(Edit edit) {
+        if (System.nanoTime() - pendingAt >= MERGE_WINDOW_NANOS) return false;
+        if (edit.start < pending.start || edit.start + edit.removed.length() > pending.start + pending.inserted.length()) return false;
+        return !crossesParagraph(pending.removed) && !crossesParagraph(pending.inserted)
+                && !crossesParagraph(edit.removed) && !crossesParagraph(edit.inserted);
+    }
+
+    private static boolean crossesParagraph(String text) { return text.indexOf('\n') >= 0; }
+
+    private void commitPending() {
+        Edit done = pending;
+        pending = null;
+        if (done != null && !done.removed.equals(done.inserted)) push(done);
+    }
+
+    private void push(Edit edit) {
+        undo.push(edit);
+        if (undo.size() > HISTORY_LIMIT) undo.removeLast();
     }
 
     private void checkRange(int start, int end) {

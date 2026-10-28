@@ -8,8 +8,8 @@ android {
         applicationId 'txteditor.android'
         minSdk 26
         targetSdk 35
-        versionCode 2
-        versionName '1.1'
+        versionCode 3
+        versionName '1.2'
         testApplicationId 'txteditor.android.tests'
         testInstrumentationRunner 'txteditor.android.DeviceTests'
     }
@@ -22,6 +22,15 @@ android {
         }
     }
     sourceSets.main.java.srcDir '../editor-core/src/main/java'
+    buildTypes {
+        release {
+            // 发布包沿用调试证书，保证自动构建之间可覆盖安装；混淆后体积约为调试包的四分之一
+            signingConfig signingConfigs.debug
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+        }
+    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
@@ -37,7 +46,7 @@ dependencies {
 // Keep the existing deterministic JVM checks runnable without Android stubs.
 tasks.register('compileAdapterCheck', JavaCompile) {
     source fileTree('../editor-core/src/main/java'),
-            files('src/main/java/txteditor/android/TextEdits.java', 'src/main/java/txteditor/android/Draft.java'),
+            files('src/main/java/txteditor/android/TextEdits.java', 'src/main/java/txteditor/android/DraftFormat.java'),
             fileTree('src/test/java')
     classpath = files()
     destinationDirectory = layout.buildDirectory.dir('adapter-check')

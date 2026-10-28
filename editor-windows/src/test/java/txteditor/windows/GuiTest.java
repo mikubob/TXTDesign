@@ -20,9 +20,18 @@ public final class GuiTest {
         if (GraphicsEnvironment.isHeadless()) throw new IllegalStateException("GUI test requires an interactive Windows desktop");
         Path directory = Files.createTempDirectory("txteditor-gui-");
         try {
-            window = edt(() -> { EditorTheme.install(false); EditorWindow frame = new EditorWindow(); frame.setVisible(true); return frame; });
+            // 会话与偏好落到临时目录，避免覆盖真实用户数据；主题固定为浅色保证断言确定。
+            Path data = directory.resolve("data");
+            Files.createDirectories(data);
+            System.setProperty("txteditor.data", data.toString());
+            java.util.Properties prefs = new java.util.Properties();
+            prefs.setProperty("theme", "light");
+            prefs.setProperty("recent.0", directory.resolve("已删除.txt").toString());
+            EditorStore.savePrefs(prefs);
+            window = edt(() -> { EditorWindow.installSavedTheme(); EditorWindow frame = new EditorWindow(); frame.setVisible(true); return frame; });
             Robot robot = new Robot(); robot.setAutoDelay(50);
             modernInteractions();
+            docking();
             edt(() -> { window.area.requestFocusInWindow(); window.area.replaceSelection("中文😀\n第二行\n中文"); return null; });
             waitFor(() -> edt(() -> window.model.getText().equals(window.area.getText())));
             edt(() -> {
@@ -52,6 +61,7 @@ public final class GuiTest {
             choose(saved);
             waitFor(() -> Files.exists(saved) && edt(() -> !window.model.isModified() && window.area.isEditable()));
             eq("替换😀\n第二行\n中文替换", SafeFiles.read(saved));
+            check(((JMenu) menu("文件", "最近文件")).getItem(0).isEnabled());
             System.out.println("GuiTest: saved UTF-8; checking leave protection");
             edt(() -> { window.area.append("未保存"); return null; });
             invokeMenu("文件", "新建"); clickDialog("取消");
@@ -70,9 +80,15 @@ public final class GuiTest {
             waitFor(() -> edt(() -> window.getTitle().startsWith("sample.txt") && window.area.isEditable()));
             robot.waitForIdle();
             previews(robot);
+            sessionRestore();
             System.out.println("GuiTest PASS: " + checks + " checks; scale=" + UIScale.getUserScaleFactor() + "; previews=build/preview-*.png");
         } finally {
             edt(() -> { for (Window frame : Window.getWindows()) frame.dispose(); return null; });
+            Path data = directory.resolve("data");
+            if (Files.exists(data)) {
+                try (DirectoryStream<Path> files = Files.newDirectoryStream(data)) { for (Path path : files) Files.deleteIfExists(path); }
+                Files.delete(data);
+            }
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) { for (Path path : files) Files.deleteIfExists(path); }
             Files.delete(directory);
         }
@@ -84,6 +100,8 @@ public final class GuiTest {
             check(window.area.getFont().canDisplay(0x4e2d)); check(window.area.getFont().canDisplay(0x1f600));
             check(!window.searchPanel.isVisible());
             check(!menu("编辑", "撤销").isEnabled()); check(!menu("编辑", "重做").isEnabled());
+            JMenu recent = (JMenu) menu("文件", "最近文件");
+            check(recent.getItemCount() == 1); check(!recent.getItem(0).isEnabled()); // 缺失文件置灰
             check(window.area.getInputMap().get(KeyStroke.getKeyStroke("control H")).equals("替换…"));
             key("control F"); check(window.searchPanel.isVisible());
             check(!menu("查找", "下一处").isEnabled());
@@ -95,9 +113,13 @@ public final class GuiTest {
         edt(() -> {
             window.query.setText("中文"); window.replacement.setText("汉字");
             check(menu("查找", "下一处").isEnabled());
-            window.validate(); int expandedHeight = window.area.getVisibleRect().height;
+            window.validate();
+            Rectangle expanded = window.area.getVisibleRect();
+            eq("查找面板已展开", window.searchPanel.getAccessibleContext().getAccessibleDescription());
             button(window, "关闭查找").doClick(); window.validate();
-            check(!window.searchPanel.isVisible()); check(window.area.getVisibleRect().height > expandedHeight);
+            check(!window.searchPanel.isVisible()); check(window.area.getVisibleRect().width > expanded.width
+                    || window.area.getVisibleRect().height > expanded.height);
+            eq("查找面板已收起", window.searchPanel.getAccessibleContext().getAccessibleDescription());
             eq("中文", window.query.getText()); eq("汉字", window.replacement.getText()); return null;
         });
         waitFor(() -> edt(() -> window.area.isFocusOwner()));
@@ -119,15 +141,70 @@ public final class GuiTest {
             eq("", window.model.getText()); check(!window.model.canUndo()); check(!window.model.isModified());
             window.area.replaceSelection("主题切换保留中文😀与选区"); window.area.select(0, 4);
             String text = window.model.getText(); int start = window.area.getSelectionStart(), end = window.area.getSelectionEnd();
-            menu("视图", "深色模式").doClick();
+            menu("视图", "深色").doClick();
             check(FlatLaf.isLafDark()); eq(text, window.area.getText());
             eq(start, window.area.getSelectionStart()); eq(end, window.area.getSelectionEnd()); check(window.model.canUndo());
-            check(button(window, "浅色模式").getAccessibleContext().getAccessibleName().equals("浅色模式"));
-            checkContrast(); menu("视图", "浅色模式").doClick(); check(!FlatLaf.isLafDark()); checkContrast();
+            check(button(window, "主题：深色").getAccessibleContext().getAccessibleName().equals("主题：深色"));
+            checkContrast(); menu("视图", "浅色").doClick(); check(!FlatLaf.isLafDark()); checkContrast();
             menu("编辑", "撤销").doClick(); eq("", window.area.getText());
             window.model.load(""); window.binding.refresh(); return null;
         });
         System.out.println("GuiTest: theme, zoom, search visibility/focus, shortcuts and shared actions checked");
+    }
+
+    /** W5：宽度充足时查找栏停靠右侧且不超过 320，窄窗口回顶部条。 */
+    private static void docking() throws Exception {
+        edt(() -> { window.setSize(UIScale.scale(new Dimension(1080, 780))); menu("查找", "查找…").doClick(); return null; });
+        edt(() -> {
+            window.validate();
+            check(window.searchPanel.getParent() == window.searchDock);
+            check(window.searchPanel.getWidth() <= UIScale.scale(320));
+            check(window.area.getVisibleRect().height >= UIScale.scale(100));
+            return null;
+        });
+        edt(() -> { window.setSize(window.getMinimumSize()); return null; });
+        edt(() -> {
+            window.validate();
+            check(window.searchPanel.getParent() == window.documentTop);
+            return null;
+        });
+        edt(() -> { window.setSize(UIScale.scale(new Dimension(1080, 780))); key("ESCAPE"); return null; });
+        edt(() -> { window.validate(); return null; });
+        System.out.println("GuiTest: docked search bar checked");
+    }
+
+    /** W1：编辑后防抖落盘，模拟进程被杀后新窗口恢复文本、光标与提示只出现一次。 */
+    private static void sessionRestore() throws Exception {
+        edt(() -> { window.area.requestFocusInWindow(); window.area.setCaretPosition(0); window.area.selectAll();
+            window.area.replaceSelection("会话恢复😀\n第二行"); return null; });
+        waitFor(() -> edt(() -> window.model.getText().startsWith("会话恢复😀\n第二行")));
+        Thread.sleep(1200);
+        Path session = EditorStore.directory().resolve("session.dat");
+        check(Files.exists(session));
+        check(SafeFiles.read(session).contains("会话恢复😀\n第二行"));
+        String expected = edt(() -> window.model.getText());
+        int caret = edt(() -> window.model.getSelectionEnd());
+        edt(() -> { window.setVisible(false); return null; });
+        EditorWindow second = edt(() -> { EditorWindow frame = new EditorWindow(); frame.setVisible(true); return frame; });
+        edt(() -> {
+            eq(expected, second.area.getText()); eq(caret, second.model.getSelectionEnd());
+            check(second.status.getText().startsWith("已恢复上次会话"));
+            return null;
+        });
+        EditorWindow first = window;
+        window = second; // 复用菜单 / 选择器助手
+        Path resaved = EditorStore.directory().getParent().resolve("恢复后保存.txt");
+        invokeMenu("文件", "另存为…"); choose(resaved);
+        waitFor(() -> Files.exists(resaved) && edt(() -> !window.model.isModified() && window.area.isEditable()));
+        eq(expected, SafeFiles.read(resaved));
+        window = first;
+        edt(() -> {
+            second.area.append("继续");
+            check(!second.status.getText().startsWith("已恢复上次会话")); // 提示只出现一次
+            return null;
+        });
+        edt(() -> { second.dispose(); window.setVisible(true); return null; });
+        System.out.println("GuiTest: session draft and crash restore checked");
     }
 
     private static void previews(Robot robot) throws Exception {
@@ -136,13 +213,13 @@ public final class GuiTest {
         render("preview-light" + scale + ".png");
         edt(() -> {
             menu("查找", "替换…").doClick(); window.query.setText("中文"); window.replacement.setText("文字");
-            window.area.setCaretPosition(0); window.find(); menu("视图", "深色模式").doClick(); window.validate();
+            window.area.setCaretPosition(0); window.find(); menu("视图", "深色").doClick(); window.validate();
             checkLayout(window.getContentPane()); return null;
         });
         render("preview-dark" + scale + ".png");
         edt(() -> { window.setSize(window.getMinimumSize()); window.validate(); checkLayout(window.getContentPane()); return null; });
         render("preview-dark-compact" + scale + ".png");
-        edt(() -> { menu("视图", "浅色模式").doClick(); window.validate(); checkLayout(window.getContentPane()); return null; });
+        edt(() -> { menu("视图", "浅色").doClick(); window.validate(); checkLayout(window.getContentPane()); return null; });
         render("preview-light-compact" + scale + ".png");
         edt(() -> { key("ESCAPE"); window.setSize(UIScale.scale(new Dimension(1080, 780))); window.validate(); return null; });
         render("windows-render.png");

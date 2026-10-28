@@ -3,12 +3,37 @@ package txteditor.windows;
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import javax.swing.UIManager;
 
 /** One palette for the window, standard Swing controls and dialogs. */
 final class EditorTheme {
+    /** 读取 Windows 应用主题；读取失败或非 Windows 时回落浅色。 */
+    static boolean systemIsDark() {
+        Process process = null;
+        try {
+            process = new ProcessBuilder("reg", "query",
+                    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "/v", "AppsUseLightTheme")
+                    .redirectErrorStream(true).start();
+            try (BufferedReader output = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                for (String line; (line = output.readLine()) != null; ) {
+                    int at = line.indexOf("AppsUseLightTheme");
+                    if (at >= 0) return line.substring(at).trim().endsWith("0x0");
+                }
+            }
+        } catch (IOException unavailable) {
+            return false;
+        } finally {
+            if (process != null) process.destroy();
+        }
+        return false;
+    }
+
     static void install(boolean dark) {
         Map<String, String> defaults = new HashMap<String, String>();
         defaults.put("@accentColor", dark ? "#60A5FA" : "#2563EB");

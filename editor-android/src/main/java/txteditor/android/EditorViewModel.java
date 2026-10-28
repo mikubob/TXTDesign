@@ -13,10 +13,13 @@ import java.io.File;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.CharacterCodingException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import txteditor.core.EditorModel;
+import txteditor.core.SessionSnapshot;
 import txteditor.core.TextCodec;
+import txteditor.core.TextKeys;
 
 final class EditorViewModel extends ViewModel {
     static final int NONE = 0, NEW = 1, OPEN = 2, EXIT = 3;
@@ -26,10 +29,15 @@ final class EditorViewModel extends ViewModel {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final File draftFile, recoveryFile;
     Runnable observer;
-    boolean busy, search;
+    boolean busy, search, saveFailed;
     String name = "未命名.txt", uri = "", saved = "", pattern = "", replacement = "", message = "";
     int scroll, afterSave, readyAction, documentVersion;
     private final Runnable delayedDraft = this::persist;
+
+    /** 打开时区分 16 MiB 上限与其他失败，避免把大小问题误报成编码问题。 */
+    private static final class TooLarge extends IOException {
+        TooLarge(String message) { super(message); }
+    }
 
     EditorViewModel(Context context) {
         app = context.getApplicationContext();
@@ -37,21 +45,22 @@ final class EditorViewModel extends ViewModel {
         recoveryFile = new File(app.getFilesDir(), "recovery.bin");
         busy = true;
         io.execute(() -> {
-            Draft result = null; String error = "";
+            DraftFormat.Decoded result = null; String error = "";
             File candidate = Math.max(recoveryFile.lastModified(), new File(recoveryFile + ".bak").lastModified())
                     > Math.max(draftFile.lastModified(), new File(draftFile + ".bak").lastModified()) ? recoveryFile : draftFile;
             if (candidate.exists() || new File(candidate + ".bak").exists()) {
                 try { result = DraftStore.read(candidate); }
                 catch (Exception failure) { error = "草稿读取失败，原副本仍保留：" + detail(failure); }
             }
-            final Draft restored = result; final String problem = error;
+            final DraftFormat.Decoded restored = result; final String problem = error;
             main.post(() -> {
                 if (restored != null) {
-                    core.load(restored.text); core.markSaved(restored.saved); saved = restored.saved;
-                    core.setSelection(TextEdits.boundary(restored.text, restored.start, false),
-                            TextEdits.boundary(restored.text, Math.max(restored.start, restored.end), true));
-                    uri = restored.uri; name = restored.name; pattern = restored.pattern;
-                    replacement = restored.replacement; search = restored.search; scroll = restored.scroll;
+                    SessionSnapshot draft = restored.snapshot;
+                    core.load(draft.text); core.markSaved(draft.savedText); saved = draft.savedText;
+                    core.setSelection(TextEdits.boundary(draft.text, draft.selectionStart, false),
+                            TextEdits.boundary(draft.text, Math.max(draft.selectionStart, draft.selectionEnd), true));
+                    uri = restored.uri; name = draft.fileName; pattern = draft.pattern;
+                    replacement = draft.replacement; search = draft.searchOpen; scroll = draft.scroll;
                     message = "已恢复本地草稿（编辑历史从此处重新记录）";
                 } else message = problem;
                 documentVersion++; busy = false; notifyChange();
@@ -61,21 +70,18 @@ final class EditorViewModel extends ViewModel {
 
     void notifyChange() { if (observer != null) observer.run(); }
 
-    Draft snapshot() {
-        Draft draft = new Draft();
-        draft.text = core.getText(); draft.saved = saved; draft.uri = uri; draft.name = name;
-        draft.start = core.getSelectionStart(); draft.end = core.getSelectionEnd(); draft.scroll = scroll;
-        draft.pattern = pattern; draft.replacement = replacement; draft.search = search;
-        return draft;
+    SessionSnapshot snapshot() {
+        return new SessionSnapshot(core.getText(), saved, name, core.getSelectionStart(), core.getSelectionEnd(),
+                scroll, pattern, replacement, search);
     }
 
     void edited() { main.removeCallbacks(delayedDraft); main.postDelayed(delayedDraft, 700); }
 
     void persist() {
         main.removeCallbacks(delayedDraft);
-        Draft draft = snapshot();
+        SessionSnapshot draft = snapshot(); String target = uri;
         io.execute(() -> {
-            try { DraftStore.write(draftFile, draft); }
+            try { DraftStore.write(draftFile, draft, target); }
             catch (Exception error) { main.post(() -> { message = "本地草稿保存失败：" + detail(error); notifyChange(); }); }
         });
     }
@@ -96,7 +102,7 @@ final class EditorViewModel extends ViewModel {
                     byte[] buffer = new byte[8192]; int count;
                     while ((count = in.read(buffer)) != -1) {
                         // shortcut: 首版针对小文本，超过 16 MiB 时需分页或流式编辑器。
-                        if (bytes.size() + count > 16 * 1024 * 1024) throw new IOException("文件超过 16 MiB，请选择较小文本");
+                        if (bytes.size() + count > 16 * 1024 * 1024) throw new TooLarge(TextKeys.of(TextKeys.TOO_LARGE, "16 MiB"));
                         bytes.write(buffer, 0, count);
                     }
                     text = TextCodec.decodeUtf8(bytes.toByteArray());
@@ -106,21 +112,29 @@ final class EditorViewModel extends ViewModel {
                     core.load(text); saved = text; uri = target.toString(); name = filename; scroll = 0;
                     documentVersion++; busy = false; message = "已打开 UTF-8 文本"; persist(); notifyChange();
                 });
+            } catch (TooLarge error) {
+                main.post(() -> {
+                    busy = false; message = error.getMessage(); notifyChange();
+                });
+            } catch (CharacterCodingException error) {
+                main.post(() -> {
+                    busy = false; message = TextKeys.of(TextKeys.NOT_UTF8); notifyChange();
+                });
             } catch (Exception error) {
                 main.post(() -> {
-                    busy = false; message = "打开失败（仅支持有效 UTF-8）：" + detail(error); notifyChange();
+                    busy = false; message = "打开失败：" + detail(error); notifyChange();
                 });
             }
         });
     }
 
     void save(Uri target) {
-        Draft draft = snapshot();
+        SessionSnapshot draft = snapshot(); String previous = uri;
         busy = true; notifyChange();
         io.execute(() -> {
             try {
                 // 写 URI 前必须先可靠落盘；提供者截断后失败时仍可恢复。
-                DraftStore.write(recoveryFile, draft);
+                DraftStore.write(recoveryFile, draft, previous);
                 byte[] bytes = TextCodec.encodeUtf8(draft.text);
                 ContentResolver resolver = app.getContentResolver();
                 try (OutputStream out = resolver.openOutputStream(target, "wt")) {
@@ -136,8 +150,8 @@ final class EditorViewModel extends ViewModel {
                 });
             } catch (Exception error) {
                 main.post(() -> {
-                    busy = false; afterSave = NONE;
-                    message = "保存失败，编辑内容仍保留；覆盖前成功写入的恢复副本也会保留。可用“文件 → 另存为”重试：" + detail(error);
+                    busy = false; afterSave = NONE; saveFailed = true;
+                    message = TextKeys.of(TextKeys.SAVE_FAILED);
                     persist(); notifyChange();
                 });
             }

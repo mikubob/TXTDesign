@@ -23,6 +23,7 @@ final class EditorBinding extends DocumentFilter {
     private final Consumer<String> error;
     private boolean writing;
     private boolean composing;
+    private boolean grouping;
 
     EditorBinding(JTextArea area, EditorModel model, Runnable changed, Consumer<String> error) {
         this.area = area; this.model = model; this.changed = changed; this.error = error;
@@ -72,6 +73,7 @@ final class EditorBinding extends DocumentFilter {
             if (length == 0) { while (!model.isBoundary(start)) start++; end = start; }
             else { while (!model.isBoundary(start)) start--; while (!model.isBoundary(end)) end++; }
             String normalized = TextCodec.normalize(text);
+            beginGroup();
             model.replace(start, end, normalized);
             writing = true;
             try { fb.replace(start, end - start, normalized, attrs); }
@@ -88,6 +90,20 @@ final class EditorBinding extends DocumentFilter {
     void finishInput() {
         if (area.getInputContext() != null) area.getInputContext().endComposition();
         flushComposition();
+        endGroup();
+    }
+
+    /** 一次输入连续提交共用一条历史，合并规则由核心按相邻/同段/500ms 判定。 */
+    private void beginGroup() {
+        if (grouping) return;
+        model.beginTransaction();
+        grouping = true;
+    }
+
+    void endGroup() {
+        if (!grouping) return;
+        model.endTransaction();
+        grouping = false;
     }
 
     private void flushComposition() {
@@ -100,6 +116,7 @@ final class EditorBinding extends DocumentFilter {
         while (oldEnd > start && newEnd > start && old.charAt(oldEnd - 1) == now.charAt(newEnd - 1)) { oldEnd--; newEnd--; }
         while (!model.isBoundary(oldEnd)) { oldEnd++; newEnd++; }
         try {
+            beginGroup();
             model.replace(start, oldEnd, now.substring(start, newEnd));
             composing = false;
             if (!model.getText().equals(now)) refresh();

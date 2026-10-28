@@ -8,7 +8,7 @@
 - 标准 Gradle Wrapper 8.11.1（官方 SHA-256 校验）、AGP 8.9.2；compileSdk 35 revision 2、Build Tools 36.0.0、targetSdk 35、minSdk 26、Java 8 字节码。
 - Material 1.12.0、AppCompat 1.7.0、Lifecycle ViewModel 2.8.7。构建不再调用旧的手工 AAPT2/javac/D8 拼装链路或 libs JAR。
 - 测试实例：Medium Phone API 37.0，Android 17，x86_64，软件图形渲染；1080×2400、420 dpi。未连接实体手机。
-- APK：[build/txteditor-debug.apk](build/txteditor-debug.apk)，**6,699,832 字节**，包名 txteditor.android，versionCode 2 / versionName 1.1。
+- APK：[build/txteditor-android.apk](build/txteditor-android.apk)，**1,633,070 字节**（R8 混淆与资源裁剪后），包名 txteditor.android，versionCode 3 / versionName 1.2。
 - APK SHA-256：`701334C2D10F30F5349260D936E8ECCA19D2D9DEB6F960A497B39A0F14160398`。
 - 签名证书 SHA-256：`F478EB230EE017DAF791045DAC50B665BB0859DF444EAB3F053B1581FE0E3D8B`，与原 build/debug.keystore 相同。apksigner v2 校验通过；主/测试 APK 均以 adb install -r 安装成功。没有卸载应用或清除用户数据。
 - 原调试证书已迁移至 signing/debug.keystore，避免 Gradle clean 删除证书；请单独备份。测试只覆盖测试模拟器的演示文档与草稿。

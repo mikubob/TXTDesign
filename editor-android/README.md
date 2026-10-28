@@ -16,10 +16,10 @@ powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Test
 
 首次构建需联网下载 Wrapper 与 Maven 依赖；SDK Manager 安装 Android SDK Platform 35 和 Build Tools 36.0.0。脚本也接受 `-Sdk 'SDK目录'`，默认依次读取 ANDROID_HOME、ANDROID_SDK_ROOT、LOCALAPPDATA/Android/Sdk。脚本生成本机 `local.properties`；它不纳入版本管理。
 
-产物：**build/txteditor-debug.apk**（脚本便捷副本）；Gradle 原始产物位于 `build/outputs/apk/debug/SimpleText-debug.apk`。`-Test` 执行真实编译、5,576 项 JVM 适配检查、Android Lint 和 APK 签名校验。依赖下载完成后，可在本模块运行：
+产物：**build/txteditor-android.apk**（脚本便捷副本）；Gradle 原始产物位于 `build/outputs/apk/release/SimpleText-release.apk`。发布变体启用 R8 混淆与资源裁剪并沿用调试证书签名，体积约为调试包的四分之一。`-Test` 执行真实编译、5,576 项 JVM 适配检查、Android Lint 和 APK 签名校验。依赖下载完成后，可在本模块运行：
 
 ```powershell
-.\gradlew.bat --offline assembleDebug adapterCheck lintDebug
+.\gradlew.bat --offline assembleRelease adapterCheck lintDebug
 ```
 
 连接一台已授权手机或模拟器：

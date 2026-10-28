@@ -1,6 +1,7 @@
 package txteditor.windows;
 
 import txteditor.core.EditorModel;
+import txteditor.core.SessionSnapshot;
 import javax.swing.*;
 import javax.swing.text.*;
 import java.io.IOException;
@@ -8,15 +9,17 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.file.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 
 public final class DesktopTest {
     private static int checks;
     public static void main(String[] args) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
-            try { bindingTests(); }
+            try { bindingTests(); groupingTests(); }
             catch (Exception failure) { throw new RuntimeException(failure); }
         });
         fileTests();
+        sessionTests();
         System.out.println("DesktopTest PASS: " + checks + " checks");
     }
 
@@ -87,6 +90,59 @@ public final class DesktopTest {
             try { SafeFiles.write(directory.resolve("不存在/失败.txt"), model.getText()); throw new AssertionError("expected failure"); }
             catch (IOException expected) { eq("保留内容", model.getText()); check(model.isModified()); }
         } finally {
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) { for (Path path : files) Files.deleteIfExists(path); }
+            Files.delete(directory);
+        }
+    }
+
+    /** 连续提交合并成一条历史；换行断开合并。 */
+    private static void groupingTests() throws Exception {
+        EditorModel model = new EditorModel();
+        JTextArea area = new JTextArea();
+        EditorBinding binding = new EditorBinding(area, model, () -> { }, message -> { });
+        AbstractDocument document = (AbstractDocument) area.getDocument();
+        for (String piece : new String[] {"连", "续", "输", "入"}) document.insertString(document.getLength(), piece, null);
+        check(model.canUndo());
+        check(model.undo()); eq("", model.getText()); check(!model.canUndo());
+        check(model.redo()); eq("连续输入", model.getText());
+        binding.finishInput();
+        document.insertString(document.getLength(), "\n", null);
+        document.insertString(document.getLength(), "新", null);
+        binding.finishInput();
+        check(model.undo()); eq("连续输入\n", model.getText());
+        check(model.undo()); eq("连续输入", model.getText());
+    }
+
+    private static void sessionTests() throws Exception {
+        Path directory = Files.createTempDirectory("txteditor-session-");
+        String previous = System.getProperty("txteditor.data");
+        System.setProperty("txteditor.data", directory.toString());
+        try {
+            check(EditorStore.readSession() == null); eq(0L, EditorStore.sessionTime());
+            SessionSnapshot out = new SessionSnapshot("中文😀\n第二行", "中文", "目录/文件.txt", 2, 4, 120, "中文", "\n", true);
+            EditorStore.writeSession(out);
+            SessionSnapshot in = EditorStore.readSession();
+            eq(out.text, in.text); eq(out.savedText, in.savedText); eq(out.fileName, in.fileName);
+            eq(out.selectionStart, in.selectionStart); eq(out.selectionEnd, in.selectionEnd); eq(out.scroll, in.scroll);
+            eq(out.pattern, in.pattern); eq(out.replacement, in.replacement); eq(true, in.searchOpen);
+            check(EditorStore.sessionTime() > 0);
+            Files.write(directory.resolve("session.dat"), new byte[] {(byte) 0xff, 1, 2});
+            check(EditorStore.readSession() == null);
+            Files.write(directory.resolve("session.dat"), "txteditor-session 1\nabc\n".getBytes("UTF-8"));
+            check(EditorStore.readSession() == null);
+            EditorStore.clearSession(); check(!Files.exists(directory.resolve("session.dat")));
+            Properties prefs = new Properties(); prefs.setProperty("theme", "dark");
+            EditorStore.savePrefs(prefs); eq("dark", EditorStore.loadPrefs().getProperty("theme"));
+            Path target = directory.resolve("外部.txt");
+            SafeFiles.write(target, "一");
+            long modified = Files.getLastModifiedTime(target).toMillis(), size = Files.size(target);
+            check(!EditorStore.externallyModified(target, modified, size));
+            SafeFiles.write(target, "一二三四");
+            check(EditorStore.externallyModified(target, modified, size));
+            check(!EditorStore.externallyModified(directory.resolve("不存在.txt"), modified, size));
+            check(!EditorStore.tooLarge(16L << 20)); check(EditorStore.tooLarge((16L << 20) + 1));
+        } finally {
+            if (previous == null) System.clearProperty("txteditor.data"); else System.setProperty("txteditor.data", previous);
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) { for (Path path : files) Files.deleteIfExists(path); }
             Files.delete(directory);
         }

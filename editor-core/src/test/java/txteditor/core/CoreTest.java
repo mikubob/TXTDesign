@@ -37,8 +37,70 @@ public final class CoreTest {
         eq("中文😀\n", TextCodec.decodeUtf8(TextCodec.encodeUtf8("中文😀\r\n")));
         try { TextCodec.decodeUtf8(new byte[] {(byte)0xc3, 0x28}); throw new AssertionError("bad UTF-8 accepted"); }
         catch (CharacterCodingException expected) { checks++; }
-        randomEdits(); randomKmp();
+        textKeys();
+        randomEdits(); randomKmp(); transactions();
         System.out.println("CoreTest PASS: " + checks + " checks");
+    }
+
+    private static void textKeys() {
+        check(TextKeys.of(TextKeys.SAVE_FAILED).startsWith("保存失败"));
+        check(TextKeys.of(TextKeys.NOT_UTF8).contains("UTF-8"));
+        eq("未找到：中文", TextKeys.of(TextKeys.NOT_FOUND, "中文"));
+        check(TextKeys.of(TextKeys.EXTERNALLY_MODIFIED, "a.txt").contains("a.txt"));
+        eq("文件超过 16 MiB 上限，已按只读方式打开。", TextKeys.of(TextKeys.TOO_LARGE, "16 MiB"));
+        eq("未知键", TextKeys.of("未知键"));
+        SessionSnapshot snapshot = new SessionSnapshot("正文", "正文", "a.txt", 1, 2, 30, "查", "换", true);
+        eq("正文", snapshot.text); eq("正文", snapshot.savedText); eq("a.txt", snapshot.fileName);
+        eq(2, snapshot.selectionEnd); eq(30, snapshot.scroll); eq("换", snapshot.replacement); check(snapshot.searchOpen);
+    }
+
+    private static void transactions() throws Exception {
+        EditorModel m = new EditorModel();
+        m.load("第一行\n第二行");
+        m.setSelection(3, 3);
+        m.beginTransaction();
+        for (int i = 0; i < 5; i++) m.replace(3 + i, 3 + i, "字");
+        eq("第一行字字字字字\n第二行", m.getText());
+        check(m.canUndo());
+        m.endTransaction();
+        check(m.undo()); eq("第一行\n第二行", m.getText());
+        eq(3, m.getSelectionStart()); eq(3, m.getSelectionEnd());
+        check(!m.canUndo());
+        check(m.redo()); eq("第一行字字字字字\n第二行", m.getText()); eq(8, m.getSelectionEnd());
+
+        m.load("ab");
+        m.beginTransaction();
+        m.replace(1, 1, "x"); m.replace(2, 2, "\n"); m.replace(3, 3, "y");
+        m.endTransaction();
+        int steps = 0; while (m.undo()) steps++;
+        eq(3, steps); eq("ab", m.getText());
+
+        m.load("a");
+        m.beginTransaction();
+        m.replace(1, 1, "b");
+        Thread.sleep(EditorModel.MERGE_WINDOW_MILLIS + 40);
+        m.replace(2, 2, "c");
+        m.endTransaction();
+        steps = 0; while (m.undo()) steps++;
+        eq(2, steps); eq("a", m.getText());
+
+        m.load("");
+        m.beginTransaction();
+        m.replace(0, 0, "临时");
+        check(m.canUndo());
+        m.replace(0, 2, "");
+        m.endTransaction();
+        check(!m.canUndo()); check(!m.isModified());
+
+        m.load("q");
+        m.beginTransaction();
+        m.replace(1, 1, "w");
+        check(m.canUndo()); check(m.undo()); eq("q", m.getText());
+        m.endTransaction();
+        m.beginTransaction();
+        try { m.beginTransaction(); throw new AssertionError("嵌套事务被接受"); }
+        catch (IllegalStateException expected) { checks++; }
+        m.endTransaction(); m.endTransaction();
     }
 
     private static void randomEdits() {

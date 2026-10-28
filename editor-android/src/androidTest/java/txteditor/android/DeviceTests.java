@@ -20,6 +20,7 @@ import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.util.concurrent.atomic.AtomicReference;
 import txteditor.core.EditorModel;
+import txteditor.core.SessionSnapshot;
 import txteditor.core.TextCodec;
 
 public final class DeviceTests extends Instrumentation {
@@ -230,7 +231,18 @@ public final class DeviceTests extends Instrumentation {
         File draft = new File(getTargetContext().getFilesDir(), "draft.bin");
         Field executor = EditorViewModel.class.getDeclaredField("io"); executor.setAccessible(true);
         ((java.util.concurrent.ExecutorService) executor.get(state)).submit(() -> { }).get(5, java.util.concurrent.TimeUnit.SECONDS);
-        equal("进程恢复😀\n", DraftStore.read(draft).text);
+        equal("进程恢复😀\n", DraftStore.read(draft).snapshot.text);
+        // 快照字段顺序经 AtomicFile 真实落盘再读回，字段不能串位。
+        File probe = new File(getTargetContext().getFilesDir(), "draft-probe.bin");
+        SessionSnapshot expected = new SessionSnapshot("快照😀", "旧", "草稿.txt", 1, 3, 42, "查", "换", true);
+        DraftStore.write(probe, expected, "content://example/doc/9");
+        DraftFormat.Decoded stored = DraftStore.read(probe);
+        equal("content://example/doc/9", stored.uri); equal("快照😀", stored.snapshot.text);
+        equal("旧", stored.snapshot.savedText); equal("草稿.txt", stored.snapshot.fileName);
+        equal("查", stored.snapshot.pattern); equal("换", stored.snapshot.replacement);
+        equal(1, stored.snapshot.selectionStart); equal(3, stored.snapshot.selectionEnd);
+        equal(42, stored.snapshot.scroll); equal(true, stored.snapshot.searchOpen);
+        DraftStore.delete(probe); equal(false, probe.exists());
     }
 
     private void preview(ActivityMonitor monitor) throws Exception {

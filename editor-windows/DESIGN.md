@@ -8,7 +8,9 @@
 
 Swing `EditorBinding` 是唯一编辑适配，`EditorWindow` 负责菜单、提示、查找与异步文件操作。标准 Swing 输入控件保留剪贴板、选区显示和输入法组合行为，共享模型保留真正的文本算法及历史。组合输入事件的人工验收仍有待补齐，合成组合事件测试不等于输入法真机测试。
 
-2026-10-28 的 Windows 界面升级使用固定版本 FlatLaf 3.7.2。`EditorTheme` 集中定义明暗色板和 Swing UI 默认值；`EditorIcon` 仅绘制工具图标，正文仍为 JTextArea。工具栏和菜单复用同一 Action，异步文件操作期间同步禁用。查找替换区按需展开、Escape 关闭回正文，布局采用 BorderLayout / BoxLayout；正文缩放只改字体，不进入共享历史。中文正文字体通过 Swing StyleContext 获得字体回退，兼顾微软雅黑和表情显示。构建仅在本模块编译共享源码副本的字节码，不写共享核心目录。
+2026-10-28 的 Windows 界面升级使用固定版本 FlatLaf 3.7.2。`EditorTheme` 集中定义明暗色板和 Swing UI 默认值；`EditorIcon` 仅绘制工具图标，正文仍为 JTextArea。工具栏和菜单复用同一 Action，异步文件操作期间同步禁用。查找替换区按需展开、Escape 关闭回正文，宽度 ≥ 960 逻辑像素时停靠右侧（上限 320），否则回到顶部条；矮窗口收起抬头与文件信息行。正文缩放只改字体，不进入共享历史。中文正文字体通过 Swing StyleContext 获得字体回退，兼顾微软雅黑和表情显示。构建仅在本模块编译共享源码副本的字节码，不写共享核心目录。
+
+2.0 升级在核心侧加了编辑事务、文案键和会话快照结构：`EditorModel.beginTransaction/endTransaction` 把相邻、同段落、间隔小于 500ms 的替换合并成一条历史，撤销整条还原并回到事务开始前的选区；`TextKeys` 只提供默认中文文案，呈现方式留在各端；`SessionSnapshot` 是纯结构体，序列化在平台层。Windows 侧由 `EditorStore` 把会话草稿与视图偏好写入 `%LOCALAPPDATA%\TXTDesign\session\`，草稿复用 `SafeFiles` 的临时文件加原子移动，编辑后 700ms 防抖，启动时比较 `lastExit` 决定是否恢复；偏好文件保存三态主题、窗口几何、缩放与最近 5 条文件，窗口还原点落在已拔掉的显示器时回落主屏居中。文件通路补了拖放、最近文件、保存前 mtime/大小比对与 16 MiB 只读保护。
 
 | 操作 | 核心时间 | 额外空间 |
 | --- | --- | --- |

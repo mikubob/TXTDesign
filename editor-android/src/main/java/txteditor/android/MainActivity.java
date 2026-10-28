@@ -26,6 +26,7 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import txteditor.core.TextKeys;
 
 public final class MainActivity extends AppCompatActivity {
     private static final int PICK_OPEN = 10, PICK_SAVE = 11;
@@ -126,7 +127,8 @@ public final class MainActivity extends AppCompatActivity {
         findViewById(R.id.redo).setEnabled(!state.busy && state.core.canRedo());
         if (!state.message.isEmpty()) {
             String message = state.message; state.message = "";
-            if (message.startsWith("保存失败")) new MaterialAlertDialogBuilder(this).setTitle("保存未完成")
+            boolean failed = state.saveFailed; state.saveFailed = false;
+            if (failed) new MaterialAlertDialogBuilder(this).setTitle("保存未完成")
                     .setMessage(message).setPositiveButton("另存为", (d, w) -> save(true)).setNegativeButton("继续编辑", null).show();
             else Toast.makeText(this, message, Toast.LENGTH_LONG).show();
         }
@@ -228,7 +230,7 @@ public final class MainActivity extends AppCompatActivity {
             int start = state.core.getSelectionStart(), end = state.core.getSelectionEnd();
             if (!replace || !state.core.getText().substring(start, end).equals(needle)) {
                 start = state.core.findNext(needle, end);
-                if (start < 0) { Toast.makeText(this, "未找到匹配", Toast.LENGTH_SHORT).show(); return; }
+                if (start < 0) { Toast.makeText(this, TextKeys.of(TextKeys.NOT_FOUND, needle), Toast.LENGTH_SHORT).show(); return; }
                 end = start + needle.length(); state.core.setSelection(start, end);
             }
             if (replace) state.core.replace(start, end, state.replacement);

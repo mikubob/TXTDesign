@@ -24,18 +24,18 @@ if (!(Test-Path -LiteralPath $key)) {
         Run "$env:JAVA_HOME\bin\keytool.exe" @('-genkeypair', '-keystore', $key, '-storepass', 'android', '-keypass', 'android', '-alias', 'androiddebugkey', '-keyalg', 'RSA', '-keysize', '2048', '-validity', '10000', '-dname', 'CN=Android Debug,O=Android,C=US')
     }
 }
-$tasks = @('assembleDebug', '--console=plain')
+$tasks = @('assembleRelease', '--console=plain')
 if ($Test) { $tasks += @('adapterCheck', 'lintDebug') }
 Run "$project\gradlew.bat" (@('-p', $project) + $tasks)
-$apk = @(Get-ChildItem -LiteralPath "$project\build\outputs\apk\debug" -Filter '*.apk')
+$apk = @(Get-ChildItem -LiteralPath "$project\build\outputs\apk\release" -Filter '*.apk')
 if ($apk.Count -ne 1) { throw '未找到唯一的调试 APK。' }
-Copy-Item -LiteralPath $apk[0].FullName -Destination "$project\build\txteditor-debug.apk" -Force
-Remove-Item -LiteralPath "$project\build\txteditor-debug.apk.idsig" -ErrorAction SilentlyContinue
-Run "$Sdk\build-tools\36.0.0\apksigner.bat" @('verify', '--verbose', '--print-certs', "$project\build\txteditor-debug.apk")
-Write-Host "APK: $project\build\txteditor-debug.apk"
+Copy-Item -LiteralPath $apk[0].FullName -Destination "$project\build\txteditor-android.apk" -Force
+Remove-Item -LiteralPath "$project\build\txteditor-android.apk.idsig" -ErrorAction SilentlyContinue
+Run "$Sdk\build-tools\36.0.0\apksigner.bat" @('verify', '--verbose', '--print-certs', "$project\build\txteditor-android.apk")
+Write-Host "APK: $project\build\txteditor-android.apk"
 if ($Install) {
     $target = @()
     if ($Serial) { $target = @('-s', $Serial) }
-    Run "$Sdk\platform-tools\adb.exe" ($target + @('install', '-r', "$project\build\txteditor-debug.apk"))
+    Run "$Sdk\platform-tools\adb.exe" ($target + @('install', '-r', "$project\build\txteditor-android.apk"))
     Run "$Sdk\platform-tools\adb.exe" ($target + @('shell', 'am', 'start', '-n', 'txteditor.android/.MainActivity'))
 }

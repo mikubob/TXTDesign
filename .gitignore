@@ -19,3 +19,6 @@ Desktop.ini
 *.pfx
 .env
 .env.*
+
+# 工作区辅助数据
+/.workbuddy/

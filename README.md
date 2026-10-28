@@ -10,13 +10,13 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `TXTDesign-android-debug.apk` | Android 8.0 及以上，下载后允许当前来源安装应用 |
-| `TXTDesign-1.1.0.exe` | Windows x64 安装器，自带 Temurin Java 21 运行时，按当前用户安装 |
+| `TXTDesign-android.apk` | Android 8.0 及以上，下载后允许当前来源安装应用 |
+| `TXTDesign-1.2.0.exe` | Windows x64 安装器，自带 Temurin Java 21 运行时，按当前用户安装 |
 | `txteditor-windows.jar` | 已安装桌面 Java 8+ 的用户可运行 `java -jar txteditor-windows.jar` |
 | `SHA256SUMS.txt` | 发布附件的 SHA-256 校验值 |
 | `Source code (zip / tar.gz)` | 对应版本的源码和 README，由 GitHub 自动提供 |
 
-安卓包使用演示用调试签名，Windows 安装器未做商业代码签名。首次安装时系统可能要求确认来源。当前版本 Android 的 `versionName` 为 1.1，仓库发布版本为 v1.1.0。
+安卓包使用演示用调试签名，Windows 安装器未做商业代码签名。首次安装时系统可能要求确认来源。安卓包经 R8 混淆与资源裁剪后约 1.6 MB，Windows 安装器只捆绑实际用到的运行时模块，约 28 MB。当前版本 Android 的 `versionName` 为 1.2，仓库发布版本为 v1.2.0。
 
 本地安卓签名证书不会上传 GitHub；自动构建会生成临时调试证书，跨次构建可能无法直接覆盖安装。遇到签名冲突时先将文档保存到应用外；卸载会删除应用私有草稿。
 
@@ -69,8 +69,8 @@ powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Test
 Windows 安装器需要可再分发的 **Temurin JDK 21 x64** 和 **WiX 3.14.1**；将 JDK `bin` 以及包含 `candle.exe`、`light.exe` 的 WiX 目录加入 `PATH` 后运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1.1.0
-# 输出：editor-windows/build/installer/TXTDesign-1.1.0.exe
+powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1.2.0
+# 输出：editor-windows/build/installer/TXTDesign-1.2.0.exe
 ```
 
 使用 JDK 自带的 [jpackage](https://docs.oracle.com/en/java/javase/21/jpackage/packaging-tool-user-guide.pdf) 打包；[WiX 官方二进制](https://github.com/wixtoolset/wix3/releases/tag/wix3141rtm)的下载和校验方法也记录在工作流中。捆绑运行时的许可说明保留在安装目录 `runtime/legal/`。
@@ -82,15 +82,15 @@ powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1
 发布新版本时，先更新安卓 `build.gradle` 中的 `versionCode` / `versionName`，再推送三段式版本标签：
 
 ```powershell
-git tag v1.1.1
-git push origin v1.1.1
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 标签构建成功后，工作流自动创建 GitHub Release，附上 APK、EXE、JAR 和校验清单；GitHub 同时提供对应标签的源码归档。自动发布使用仓库内置 `GITHUB_TOKEN`，无需在源码中放访问令牌。
 
 ## 验证与设计资料
 
-仓库整理时重新执行：CoreTest **48,448** 项、DesktopTest **41** 项、AdapterTest **5,576** 项，均通过；Android Lint、APK 签名校验通过。设备和 GUI 的历史验证范围见各模块报告，此次整理未重新运行设备回归。
+仓库整理时重新执行：CoreTest **48,482** 项、DesktopTest **72** 项、AdapterTest **5,576** 项，均通过；Android Lint、APK 签名校验通过。设备和 GUI 的历史验证范围见各模块报告，此次整理未重新运行设备回归。
 
 - [共享核心接口](editor-core/README.md)
 - [Android 构建、安装与操作](editor-android/README.md) · [验证记录](editor-android/TEST-REPORT.md)

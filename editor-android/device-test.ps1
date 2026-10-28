@@ -23,7 +23,7 @@ $tests = @(Get-ChildItem -LiteralPath "$build\outputs\apk\androidTest\debug" -Fi
 if ($tests.Count -ne 1) { throw '未找到唯一的设备测试 APK。' }
 Copy-Item -LiteralPath $tests[0].FullName -Destination "$build\txteditor-tests.apk" -Force
 Remove-Item -LiteralPath "$build\txteditor-tests.apk.idsig" -ErrorAction SilentlyContinue
-Run $adb @('-s', $Serial, 'install', '-r', "$build\txteditor-debug.apk")
+Run $adb @('-s', $Serial, 'install', '-r', "$build\txteditor-android.apk")
 Run $adb @('-s', $Serial, 'install', '-r', "$build\txteditor-tests.apk")
 foreach ($restore in @('false', 'true')) {
     Run $adb @('-s', $Serial, 'shell', 'am', 'force-stop', 'txteditor.android')
