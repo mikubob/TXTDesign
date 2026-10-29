@@ -64,11 +64,14 @@ public final class GuiTest {
             check(((JMenu) menu("文件", "最近文件")).getItem(0).isEnabled());
             System.out.println("GuiTest: saved UTF-8; checking leave protection");
             edt(() -> { insert(window, "未保存"); return null; });
-            invokeMenu("文件", "新建"); clickDialog("取消");
+            invokeMenu("文件", "新建", "纯文本（.txt）"); clickDialog("取消");
             edt(() -> { check(SyntaxPainter.text(window.area).endsWith("未保存")); check(window.model.isModified()); return null; });
-            invokeMenu("文件", "新建"); clickDialog("保存");
+            invokeMenu("文件", "新建", "纯文本（.txt）"); clickDialog("保存");
             waitFor(() -> edt(() -> window.model.getText().isEmpty() && !window.model.isModified() && window.area.isEditable()));
             check(SafeFiles.read(saved).endsWith("未保存"));
+            invokeMenu("文件", "新建", "Markdown（.md）");
+            waitFor(() -> edt(() -> window.language == txteditor.core.text.LanguageId.MARKDOWN
+                    && window.getTitle().startsWith("未命名.md") && window.model.getText().isEmpty()));
             System.out.println("GuiTest: cancel/save leave checked; reopening");
             invokeMenu("文件", "打开…"); choose(saved);
             waitFor(() -> edt(() -> window.model.getText().endsWith("未保存") && window.area.isEditable()));
@@ -104,6 +107,7 @@ public final class GuiTest {
             check(!menu("编辑", "撤销").isEnabled()); check(!menu("编辑", "重做").isEnabled());
             JMenu recent = (JMenu) menu("文件", "最近文件");
             check(recent.getItemCount() == 1); check(!recent.getItem(0).isEnabled()); // 缺失文件置灰
+            check(((JMenu) menu("文件", "新建")).getItemCount() == txteditor.core.text.LanguageId.values().length);
             check(window.area.getInputMap().get(KeyStroke.getKeyStroke("control H")).equals("替换…"));
             key("control F"); check(window.searchPanel.isVisible());
             check(!menu("查找", "下一处").isEnabled());
@@ -413,15 +417,22 @@ public final class GuiTest {
         return null;
     }
 
-    private static JMenuItem menu(String group, String name) {
+    /** 支持「文件 → 新建 → 纯文本（.txt）」这样的子菜单路径。 */
+    private static JMenuItem menu(String... path) {
         JMenuBar bar = window.getJMenuBar();
-        for (int i = 0; i < bar.getMenuCount(); i++) if (bar.getMenu(i).getText().equals(group)) {
-            JMenu menu = bar.getMenu(i);
-            for (int j = 0; j < menu.getItemCount(); j++) if (menu.getItem(j) != null && menu.getItem(j).getText().equals(name)) return menu.getItem(j);
+        JMenu menu = null;
+        for (int i = 0; i < bar.getMenuCount(); i++) if (bar.getMenu(i).getText().equals(path[0])) menu = bar.getMenu(i);
+        if (menu == null) throw new AssertionError(path[0]);
+        for (int i = 1; i < path.length; i++) {
+            JMenuItem found = null;
+            for (int j = 0; j < menu.getItemCount(); j++) if (menu.getItem(j) != null && menu.getItem(j).getText().equals(path[i])) found = menu.getItem(j);
+            if (found == null) throw new AssertionError(path[i]);
+            if (i == path.length - 1) return found;
+            menu = (JMenu) found;
         }
-        throw new AssertionError(name);
+        return menu;
     }
-    private static void invokeMenu(String group, String name) { SwingUtilities.invokeLater(() -> menu(group, name).doClick()); }
+    private static void invokeMenu(String... path) { SwingUtilities.invokeLater(() -> menu(path).doClick()); }
     private static void choose(Path path) throws Exception {
         waitFor(() -> edt(() -> findShowing(JFileChooser.class) != null));
         edt(() -> { JFileChooser chooser = findShowing(JFileChooser.class); chooser.setSelectedFile(path.toFile()); chooser.approveSelection(); return null; });

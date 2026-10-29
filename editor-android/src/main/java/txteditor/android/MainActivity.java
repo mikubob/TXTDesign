@@ -43,6 +43,8 @@ public final class MainActivity extends AppCompatActivity {
     private RecyclerView preview;
     private MarkdownAdapter previewAdapter;
     private LanguageId appliedLanguage = LanguageId.PLAIN;
+    /** 新建文档的类型；先记下来，未保存确认走完保存后仍用这一次的选择。 */
+    private LanguageId newType = LanguageId.PLAIN;
     private int renderedVersion = -1, previewVersion = -1, previewPos;
     private boolean settingFields, replacing, previewShown, settingMode;
 
@@ -286,7 +288,7 @@ public final class MainActivity extends AppCompatActivity {
     private void filesMenu(View anchor) {
         editor.sync(true);
         PopupMenu menu = new PopupMenu(this, anchor);
-        menu.getMenu().add(0, 1, 0, "新建"); menu.getMenu().add(0, 2, 1, "打开");
+        menu.getMenu().add(0, 1, 0, "新建…"); menu.getMenu().add(0, 2, 1, "打开");
         menu.getMenu().add(0, 3, 2, "另存为"); menu.getMenu().add(0, 4, 3, "关闭");
         if (findViewById(R.id.edit_actions).getVisibility() == View.GONE) {
             if (!isPreview()) {
@@ -300,7 +302,7 @@ public final class MainActivity extends AppCompatActivity {
         }
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
-                case 1: guard(EditorViewModel.NEW); break;
+                case 1: newTypeDialog(); break;
                 case 2: guard(EditorViewModel.OPEN); break;
                 case 3: save(true); break;
                 case 4: guard(EditorViewModel.EXIT); break;
@@ -313,6 +315,15 @@ public final class MainActivity extends AppCompatActivity {
             return true;
         });
         menu.show();
+    }
+
+    /** 新建可选类型：默认后缀与高亮语言一起定下来，选完仍走未保存确认。 */
+    private void newTypeDialog() {
+        LanguageId[] types = LanguageId.values();
+        String[] labels = new String[types.length];
+        for (int i = 0; i < types.length; i++) labels[i] = types[i].title + "（" + types[i].defaultSuffix + "）";
+        new MaterialAlertDialogBuilder(this).setTitle("新建文档")
+                .setItems(labels, (dialog, which) -> { newType = types[which]; guard(EditorViewModel.NEW); }).show();
     }
 
     private void history(boolean redo) {
@@ -347,7 +358,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void execute(int action) {
-        if (action == EditorViewModel.NEW) state.newDocument();
+        if (action == EditorViewModel.NEW) state.newDocument(newType);
         else if (action == EditorViewModel.OPEN) launchPicker(false);
         else if (action == EditorViewModel.EXIT) {
             // 放弃退出后清除未保存内容；普通退到后台仍恢复草稿。

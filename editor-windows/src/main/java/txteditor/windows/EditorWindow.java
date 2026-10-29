@@ -99,7 +99,13 @@ public final class EditorWindow extends JFrame {
         binding = new EditorBinding(area, model, this::documentChanged, this::showError);
         JMenuBar menus = new JMenuBar();
         JMenu files = new JMenu("文件"); files.setMnemonic(KeyEvent.VK_F);
-        Action newAction = addAction(files, "新建", "control N", () -> leave(this::newDocument));
+        // 新建先选类型：决定默认后缀与高亮语言，Ctrl+N 仍直接建纯文本。
+        JMenu newFile = new JMenu("新建");
+        for (final LanguageId type : LanguageId.values())
+            addAction(newFile, type.title + "（" + type.defaultSuffix + "）",
+                    type == LanguageId.PLAIN ? "control N" : null, () -> leave(() -> newDocument(type)));
+        files.add(newFile);
+        Action newAction = (Action) newFile.getItem(0).getAction();
         Action openAction = addAction(files, "打开…", "control O", () -> leave(this::chooseOpen));
         files.add(recentMenu);
         Action saveAction = addAction(files, "保存", "control S", () -> save(false, () -> { }));
@@ -159,7 +165,10 @@ public final class EditorWindow extends JFrame {
         heading.add(button(themeAction, THEME, false), BorderLayout.EAST);
         JPanel top = new JPanel(new BorderLayout(0, 16)); top.add(heading, BorderLayout.NORTH);
         JPanel toolbar = new JPanel(); toolbar.setLayout(new BoxLayout(toolbar, BoxLayout.X_AXIS));
-        toolbar.add(button(newAction, NEW, false)); toolbar.add(Box.createHorizontalStrut(6));
+        JButton newButton = button(newAction, NEW, false);
+        // 工具栏放不下类型后缀，按钮与无障碍名称统一叫「新建」。
+        newButton.setText("新建"); newButton.getAccessibleContext().setAccessibleName("新建");
+        toolbar.add(newButton); toolbar.add(Box.createHorizontalStrut(6));
         toolbar.add(button(openAction, OPEN, false)); toolbar.add(Box.createHorizontalStrut(6));
         JButton save = button(saveAction, SAVE, false); save.putClientProperty("FlatLaf.styleClass", "primary");
         save.putClientProperty("JButton.buttonType", "roundRect");
@@ -597,10 +606,10 @@ public final class EditorWindow extends JFrame {
         return LanguageId.detect(name, mime, head);
     }
 
-    private void newDocument() {
+    private void newDocument(LanguageId type) {
         model.load(""); binding.endGroup();
         file = null; readOnly = false; restored = false;
-        adoptLanguage(LanguageId.PLAIN);
+        adoptLanguage(type);
         setPreview(false);
         area.setEditable(!busy);
         EditorStore.clearSession(); binding.refresh(); area.requestFocusInWindow();
@@ -781,7 +790,7 @@ public final class EditorWindow extends JFrame {
     }
 
     private void updateState() {
-        String name = file == null ? "未命名" : file.getFileName().toString();
+        String name = file == null ? "未命名" + language.defaultSuffix : file.getFileName().toString();
         setTitle((model.isModified() ? "* " : "") + name + " — 文本编辑器");
         documentName.setText(name);
         documentPath.setText(file == null ? "保存后将在这里显示文件位置" : file.toString());

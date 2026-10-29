@@ -13,11 +13,11 @@ java -jar .\build\txteditor-windows.jar
 
 也可双击 `run.cmd`。最终 JAR 已包含共享核心、FlatLaf 类、资源、原生库和 Apache-2.0 许可；复制单个 JAR 到有 Java 的电脑即可启动，无需配置第三方 classpath。原生库正常由 FlatLaf 解压到临时目录；有执行限制的机器可能无法使用原生窗口装饰，见官方[原生库分发说明](https://www.formdev.com/flatlaf/native-libraries/)。
 
-[GitHub Releases](https://github.com/mikubob/TXTDesign/releases/latest) 另提供 Windows x64 EXE 安装器，自带 Temurin Java 21，无需另装 Java。安装器按当前用户安装，支持开始菜单和桌面快捷方式。源码打包需 Temurin JDK 21 x64 与 WiX 3.14.1 均在 PATH，执行 `powershell -ExecutionPolicy Bypass -File .\package.ps1 -Version 1.3.0`；输出 `build/installer/TXTDesign-1.3.0.exe`。安装器尚未使用商业代码签名证书。捆绑运行时只含 `java.desktop` 与 `java.logging` 两个模块——应用只用 UTF-8，不需要字符集与本地化数据模块，安装包因此约为 28 MB。
+[GitHub Releases](https://github.com/mikubob/TXTDesign/releases/latest) 另提供 Windows x64 EXE 安装器，自带 Temurin Java 21，无需另装 Java。安装器按当前用户安装，支持开始菜单和桌面快捷方式。源码打包需 Temurin JDK 21 x64 与 WiX 3.14.1 均在 PATH，执行 `powershell -ExecutionPolicy Bypass -File .\package.ps1 -Version 1.4.0`；输出 `build/installer/TXTDesign-1.4.0.exe`。安装器尚未使用商业代码签名证书。捆绑运行时只含 `java.desktop` 与 `java.logging` 两个模块——应用只用 UTF-8，不需要字符集与本地化数据模块，安装包因此约为 28 MB。
 
 ## 界面与操作
 
-- 顶部保留文件、编辑、查找菜单与快捷键，新增视图菜单。常用工具栏提供新建、打开、蓝色保存、撤销、重做及查找 / 替换；图标有提示与无障碍名称，空历史的撤销 / 重做会禁用。
+- 顶部保留文件、编辑、查找菜单与快捷键，新增视图菜单。文件 → 新建 先选类型（纯文本 / Markdown / Java / C / C++ / JSON / XML），Ctrl+N 直接建纯文本。常用工具栏提供新建、打开、蓝色保存、撤销、重做及查找 / 替换；图标有提示与无障碍名称，空历史的撤销 / 重做会禁用。
 - 统一浅色 / 深色主题、蓝色强调、中文字体层级、细边框、留白、圆角按钮和细滚动条。视图菜单提供跟随系统 / 浅色 / 深色三态，跟随系统读取注册表 `AppsUseLightTheme` 并每秒比对一次；右上角按钮循环切换。主题、窗口几何、缩放和最近文件存在 `%LOCALAPPDATA%\TXTDesign\session\prefs.properties`，启动首帧前先装主题，避免闪白。还原点落在已拔掉的显示器时回落主屏居中。
 - 文档卡片显示文件名、完整路径提示和修改状态。路径过长时省略显示，悬停查看完整位置。底部显示码点数、行数、UTF-8 / LF、光标行列及缩放（列按 UTF-16 单元计数）。
 - 查找栏默认收起。Ctrl+F 展开查找，Ctrl+H 或工具栏展开查找替换；宽度 ≥ 960 逻辑像素时停靠右侧（上限 320），不足时回到顶部条；关闭按钮 / Escape 收回并将焦点返回正文，展开状态写入可访问描述。收起保留查找词和替换词。Enter 执行相应查找 / 替换；结果在面板内提示。

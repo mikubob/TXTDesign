@@ -96,10 +96,15 @@ final class EditorViewModel extends ViewModel {
         });
     }
 
-    void newDocument() {
-        core.load(""); saved = ""; uri = ""; name = language.defaultFileName(); scroll = 0; viewMode = SOURCE;
+    /** 类型决定默认后缀与高亮语言，草稿随新建一起写入。 */
+    void newDocument(LanguageId type) {
+        language = type;
+        core.load(""); saved = ""; uri = ""; name = type.defaultFileName(); scroll = 0; viewMode = SOURCE;
         documentVersion++; persist(); notifyChange();
     }
+
+    /** 保持当前类型的新建。 */
+    void newDocument() { newDocument(language); }
 
     void open(Uri target) {
         busy = true; notifyChange();

@@ -1,4 +1,4 @@
-﻿param([string]$Version = '1.3.0')
+﻿param([string]$Version = '1.4.0')
 $ErrorActionPreference = 'Stop'
 # jpackage / WiX 与内层 build.ps1 都会往 stderr 写进度与警告，Windows PowerShell 5.1 在 Stop 下
 # 会把它们升级成 NativeCommandError；外部程序统一只看退出码。
