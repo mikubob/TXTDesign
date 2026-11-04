@@ -8,8 +8,8 @@ android {
         applicationId 'txteditor.android'
         minSdk 26
         targetSdk 35
-        versionCode 5
-        versionName '1.4'
+        versionCode 6
+        versionName '1.5'
         testApplicationId 'txteditor.android.tests'
         testInstrumentationRunner 'txteditor.android.DeviceTests'
     }
@@ -46,7 +46,8 @@ dependencies {
 // Keep the existing deterministic JVM checks runnable without Android stubs.
 tasks.register('compileAdapterCheck', JavaCompile) {
     source fileTree('../editor-core/src/main/java'),
-            files('src/main/java/txteditor/android/TextEdits.java', 'src/main/java/txteditor/android/DraftFormat.java'),
+            files('src/main/java/txteditor/android/TextEdits.java', 'src/main/java/txteditor/android/DraftFormat.java',
+                    'src/main/java/txteditor/android/RecentFiles.java'),
             fileTree('src/test/java')
     classpath = files()
     destinationDirectory = layout.buildDirectory.dir('adapter-check')

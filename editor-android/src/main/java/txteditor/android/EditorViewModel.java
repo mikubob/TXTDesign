@@ -33,13 +33,13 @@ final class EditorViewModel extends ViewModel {
     private final Context app;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final File draftFile, recoveryFile;
+    private final File draftFile, recoveryFile, recentFile;
     Runnable observer;
     boolean busy, search, saveFailed;
     LanguageId language = LanguageId.PLAIN;
     int viewMode = SOURCE;
     String name = LanguageId.PLAIN.defaultFileName(), uri = "", saved = "", pattern = "", replacement = "", message = "";
-    int scroll, afterSave, readyAction, documentVersion;
+    int scroll, afterSave, readyAction, documentVersion, textVersion;
     private final Runnable delayedDraft = this::persist;
 
     /** 打开时区分 16 MiB 上限与其他失败，避免把大小问题误报成编码问题。 */
@@ -51,6 +51,7 @@ final class EditorViewModel extends ViewModel {
         app = context.getApplicationContext();
         draftFile = new File(app.getFilesDir(), "draft.bin");
         recoveryFile = new File(app.getFilesDir(), "recovery.bin");
+        recentFile = new File(app.getFilesDir(), RecentFiles.NAME);
         busy = true;
         io.execute(() -> {
             DraftFormat.Decoded result = null; String error = "";
@@ -73,7 +74,7 @@ final class EditorViewModel extends ViewModel {
                     viewMode = language == LanguageId.MARKDOWN && draft.viewMode == PREVIEW ? PREVIEW : SOURCE;
                     message = "已恢复本地草稿（编辑历史从此处重新记录）";
                 } else message = problem;
-                documentVersion++; busy = false; notifyChange();
+                documentVersion++; textVersion++; busy = false; notifyChange();
             });
         });
     }
@@ -85,7 +86,8 @@ final class EditorViewModel extends ViewModel {
                 scroll, pattern, replacement, search, language.name(), viewMode);
     }
 
-    void edited() { main.removeCallbacks(delayedDraft); main.postDelayed(delayedDraft, 700); }
+    /** 每次正文变化都记一笔，实时预览靠它判断要不要重排。 */
+    void edited() { textVersion++; main.removeCallbacks(delayedDraft); main.postDelayed(delayedDraft, 700); }
 
     void persist() {
         main.removeCallbacks(delayedDraft);
@@ -100,7 +102,7 @@ final class EditorViewModel extends ViewModel {
     void newDocument(LanguageId type) {
         language = type;
         core.load(""); saved = ""; uri = ""; name = type.defaultFileName(); scroll = 0; viewMode = SOURCE;
-        documentVersion++; persist(); notifyChange();
+        documentVersion++; textVersion++; persist(); notifyChange();
     }
 
     /** 保持当前类型的新建。 */
@@ -125,14 +127,20 @@ final class EditorViewModel extends ViewModel {
                 String filename = displayName(target);
                 // 后缀优先，MIME 与首行兜底：SAF 对 .java/.c 常报 application/octet-stream。
                 LanguageId detected = LanguageId.detect(filename, mime(target), text);
+                RecentFiles.add(recentFile, target.toString(), filename);
                 main.post(() -> {
                     core.load(text); saved = text; uri = target.toString(); name = filename; scroll = 0;
                     language = detected; viewMode = SOURCE;
-                    documentVersion++; busy = false; message = "已打开 UTF-8 文本"; persist(); notifyChange();
+                    documentVersion++; textVersion++; busy = false; message = "已打开 UTF-8 文本"; persist(); notifyChange();
                 });
             } catch (TooLarge error) {
                 main.post(() -> {
                     busy = false; message = error.getMessage(); notifyChange();
+                });
+            } catch (SecurityException denied) {
+                // 最近文件重开时授权可能已失效，提示重新选择而不是报一堆堆栈。
+                main.post(() -> {
+                    busy = false; message = "没有读取该文件的权限，请在「打开」里重新选择"; notifyChange();
                 });
             } catch (CharacterCodingException error) {
                 main.post(() -> {
@@ -160,6 +168,7 @@ final class EditorViewModel extends ViewModel {
                     out.write(bytes); out.flush();
                 }
                 String filename = displayName(target);
+                RecentFiles.add(recentFile, target.toString(), filename);
                 main.post(() -> {
                     core.markSaved(draft.text); saved = draft.text; uri = target.toString(); name = filename;
                     // 另存为可能改后缀：认出新语言，没后缀时保留原语言。

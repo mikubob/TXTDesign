@@ -46,7 +46,10 @@ public final class MainActivity extends AppCompatActivity {
     /** 新建文档的类型；先记下来，未保存确认走完保存后仍用这一次的选择。 */
     private LanguageId newType = LanguageId.PLAIN;
     private int renderedVersion = -1, previewVersion = -1, previewPos;
-    private boolean settingFields, replacing, previewShown, settingMode;
+    private boolean settingFields, replacing, previewShown, settingMode, previewTooLarge;
+    /** 编辑停下 200ms 再重排预览；逐键解析长文档会拖慢输入。 */
+    private final Runnable rebuildPreview = this::buildPreview;
+    private String pendingUri;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -171,36 +174,42 @@ public final class MainActivity extends AppCompatActivity {
         return state.language == LanguageId.MARKDOWN && state.viewMode == EditorViewModel.PREVIEW;
     }
 
-    /** 源码 / 预览的可见性、分段按钮与预览内容；每次 refresh 都调用，只有状态真的变化才有副作用。 */
+    /** 源码常驻，Markdown 预览作为同屏第二块；编辑时预览按 textVersion 防抖重排。 */
     private void applyMode() {
         boolean markdown = state.language == LanguageId.MARKDOWN;
-        boolean preview = isPreview();
+        boolean live = isPreview();
         findViewById(R.id.mode_group).setVisibility(markdown ? View.VISIBLE : View.GONE);
-        editor.setVisibility(preview ? View.GONE : View.VISIBLE);
-        findViewById(R.id.preview).setVisibility(preview ? View.VISIBLE : View.GONE);
-        int checked = preview ? R.id.mode_preview : R.id.mode_source;
+        findViewById(R.id.preview).setVisibility(live ? View.VISIBLE : View.GONE);
+        int checked = live ? R.id.mode_preview : R.id.mode_source;
         MaterialButtonToggleGroup group = findViewById(R.id.mode_group);
         if (group.getCheckedButtonId() != checked) {
             settingMode = true;
             group.check(checked);
             settingMode = false;
         }
-        if (preview && previewVersion != state.documentVersion) buildPreview();
-        if (!preview && previewShown) editor.post(() -> editor.scrollTo(0, state.scroll));
-        previewShown = preview;
+        if (live && previewVersion != state.textVersion) {
+            preview.removeCallbacks(rebuildPreview);
+            preview.postDelayed(rebuildPreview, 200);
+        }
+        if (!live && previewShown) editor.post(() -> editor.scrollTo(0, state.scroll));
+        previewShown = live;
     }
 
     private void buildPreview() {
-        previewVersion = state.documentVersion;
+        if (!isPreview()) return;
+        previewVersion = state.textVersion;
+        if (preview.getVisibility() == View.VISIBLE && previewAdapter.getItemCount() > 0) savePreviewScroll();
         String text = state.core.getText();
         if (text.length() > PREVIEW_LIMIT) {
             previewAdapter.setDocument(null);
-            Toast.makeText(this, R.string.preview_too_large, Toast.LENGTH_LONG).show();
+            if (!previewTooLarge) Toast.makeText(this, R.string.preview_too_large, Toast.LENGTH_LONG).show();
+            previewTooLarge = true;
             return;
         }
+        previewTooLarge = false;
         int version = previewVersion;
         state.preview(text, document -> {
-            if (isFinishing() || isDestroyed() || version != state.documentVersion) return;
+            if (isFinishing() || isDestroyed() || version != state.textVersion) return;
             previewAdapter.setDocument(document);
             preview.scrollToPosition(previewPos);
         });
@@ -243,8 +252,8 @@ public final class MainActivity extends AppCompatActivity {
         boolean landscape = getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
         findViewById(R.id.subtitle).setVisibility(compact || root.getWidth() < 300 * density ? View.GONE : View.VISIBLE);
         findViewById(R.id.status).setVisibility(compact ? View.GONE : View.VISIBLE);
-        // 预览态没有撤销与查找，整行收起。
-        boolean hideActions = compact && (landscape || height < 240 * density) || isPreview();
+        // 预览分屏时源码仍可编辑，撤销与查找保持可用。
+        boolean hideActions = compact && (landscape || height < 240 * density);
         findViewById(R.id.edit_actions).setVisibility(hideActions ? View.GONE : View.VISIBLE);
         View toolbar = findViewById(R.id.toolbar);
         // A very short IME window needs the remaining height for actual text lines.
@@ -281,29 +290,39 @@ public final class MainActivity extends AppCompatActivity {
 
     private void captureFields() {
         state.pattern = pattern.getText().toString(); state.replacement = replacement.getText().toString();
-        // 预览态下编辑区是 GONE，getScrollY 会归零，不能覆盖已记录的滚动位置。
-        if (editor.getVisibility() == View.VISIBLE) state.scroll = editor.getScrollY();
+        state.scroll = editor.getScrollY(); // 编辑区常驻，预览分屏时滚动位置照常记录
     }
 
     private void filesMenu(View anchor) {
         editor.sync(true);
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add(0, 1, 0, "新建…"); menu.getMenu().add(0, 2, 1, "打开");
-        menu.getMenu().add(0, 3, 2, "另存为"); menu.getMenu().add(0, 4, 3, "关闭");
+        // 最近打开按时间倒序（RecentFiles 写入时已置顶），直接续用上次的 SAF 授权。
+        final java.util.List<RecentFiles.Entry> recents = RecentFiles.read(new java.io.File(getFilesDir(), RecentFiles.NAME));
+        if (!recents.isEmpty()) {
+            android.view.SubMenu recent = menu.getMenu().addSubMenu(0, 9, 2, "最近打开");
+            for (int i = 0; i < recents.size(); i++) recent.add(0, 100 + i, i, recents.get(i).name);
+        }
+        menu.getMenu().add(0, 3, 3, "另存为"); menu.getMenu().add(0, 4, 4, "关闭");
         if (findViewById(R.id.edit_actions).getVisibility() == View.GONE) {
             if (!isPreview()) {
-                menu.getMenu().add(0, 5, 4, "撤销").setEnabled(state.core.canUndo());
-                menu.getMenu().add(0, 6, 5, "重做").setEnabled(state.core.canRedo());
-                menu.getMenu().add(0, 7, 6, state.search ? "关闭查找" : "查找与替换");
+                menu.getMenu().add(0, 5, 5, "撤销").setEnabled(state.core.canUndo());
+                menu.getMenu().add(0, 6, 6, "重做").setEnabled(state.core.canRedo());
+                menu.getMenu().add(0, 7, 7, state.search ? "关闭查找" : "查找与替换");
             }
             if (state.language == LanguageId.MARKDOWN) {
-                menu.getMenu().add(0, 8, 7, isPreview() ? "源码" : "预览");
+                menu.getMenu().add(0, 8, 8, isPreview() ? "关闭预览" : "预览");
             }
         }
         menu.setOnMenuItemClickListener(item -> {
-            switch (item.getItemId()) {
+            int id = item.getItemId();
+            if (id >= 100) {
+                if (id - 100 < recents.size()) { pendingUri = recents.get(id - 100).uri; guard(EditorViewModel.OPEN); }
+                return true;
+            }
+            switch (id) {
                 case 1: newTypeDialog(); break;
-                case 2: guard(EditorViewModel.OPEN); break;
+                case 2: pendingUri = null; guard(EditorViewModel.OPEN); break;
                 case 3: save(true); break;
                 case 4: guard(EditorViewModel.EXIT); break;
                 case 5: history(false); break;
@@ -359,8 +378,10 @@ public final class MainActivity extends AppCompatActivity {
 
     private void execute(int action) {
         if (action == EditorViewModel.NEW) state.newDocument(newType);
-        else if (action == EditorViewModel.OPEN) launchPicker(false);
-        else if (action == EditorViewModel.EXIT) {
+        else if (action == EditorViewModel.OPEN) {
+            String uri = pendingUri; pendingUri = null;
+            if (uri == null) launchPicker(false); else state.open(Uri.parse(uri));
+        } else if (action == EditorViewModel.EXIT) {
             // 放弃退出后清除未保存内容；普通退到后台仍恢复草稿。
             state.newDocument(); finish();
         }

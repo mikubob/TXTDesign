@@ -199,7 +199,7 @@ public final class GuiTest {
         edt(() -> {
             eq(expected, SyntaxPainter.text(second.area)); eq(caret, second.model.getSelectionEnd());
             check(second.status.getText().startsWith("已恢复上次会话"));
-            check(second.previewMode); check(!second.area.isShowing()); // v2 会话恢复了预览模式
+            check(second.previewMode); check(second.area.isShowing() && second.preview.pane().isShowing()); // v2 会话恢复了分屏预览
             return null;
         });
         EditorWindow first = window;
@@ -281,6 +281,12 @@ public final class GuiTest {
             check(SyntaxPainter.text(window.area).startsWith("# 标题"));
             return null;
         });
+        // 实时预览：不切换视图，源码里继续输入，右侧预览跟着更新
+        edt(() -> { insert(window, "\n实时预览追加"); return null; });
+        waitFor(() -> edt(() -> SyntaxPainter.text(window.preview.pane()).contains("实时预览追加")));
+        edt(() -> { menu("编辑", "撤销").doClick(); return null; });
+        waitFor(() -> edt(() -> !window.model.isModified()
+                && !SyntaxPainter.text(window.preview.pane()).contains("实时预览追加")));
         robot.waitForIdle();
         render("preview-markdown.png");
         edt(() -> { menu("视图", "深色").doClick(); key("control EQUALS"); window.validate(); return null; });

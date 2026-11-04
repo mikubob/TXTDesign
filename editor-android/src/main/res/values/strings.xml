@@ -6,7 +6,7 @@
     <string name="mode_source">源码</string>
     <string name="mode_preview">预览</string>
     <string name="mode_source_description">源码编辑模式</string>
-    <string name="mode_preview_description">Markdown 预览模式</string>
+    <string name="mode_preview_description">Markdown 实时预览，与源码同屏</string>
     <string name="preview_too_large">文档超过 2 MiB，预览已关闭</string>
     <string name="save">保存</string>
     <string name="more">更多文件操作</string>

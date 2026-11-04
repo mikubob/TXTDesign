@@ -4,7 +4,9 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.Random;
 import txteditor.core.EditorModel;
 import txteditor.core.SessionSnapshot;
@@ -142,6 +144,25 @@ public final class AdapterTest {
         equal(0, DraftFormat.read(new DataInputStream(new ByteArrayInputStream(oddBytes.toByteArray()))).snapshot.viewMode);
         try { DraftFormat.read(new DataInputStream(new ByteArrayInputStream(new byte[]{0, 0, 0, 3}))); throw new AssertionError(); }
         catch (IOException expected) { checks++; }
+        // A4：最近打开按时间倒序、同一 URI 去重、超出上限丢最旧的，损坏文件当空列表。
+        File recent = File.createTempFile("recent", ".bin");
+        try {
+            RecentFiles.add(recent, "content://doc/1", "一.md");
+            RecentFiles.add(recent, "content://doc/2", "二.md");
+            RecentFiles.add(recent, "content://doc/3", "三.md");
+            List<RecentFiles.Entry> entries = RecentFiles.read(recent);
+            equal(3, entries.size());
+            equal("content://doc/3", entries.get(0).uri); equal("content://doc/1", entries.get(2).uri);
+            RecentFiles.add(recent, "content://doc/1", "一.md");
+            entries = RecentFiles.read(recent);
+            equal(3, entries.size()); equal("content://doc/1", entries.get(0).uri);
+            for (int i = 0; i < 10; i++) RecentFiles.add(recent, "content://doc/x" + i, "x" + i + ".md");
+            entries = RecentFiles.read(recent);
+            equal(8, entries.size());
+            equal("content://doc/x9", entries.get(0).uri); equal("content://doc/x2", entries.get(7).uri);
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(recent)) { out.write(new byte[]{0, 0, 0, 9}); }
+            equal(0, RecentFiles.read(recent).size());
+        } finally { recent.delete(); }
         System.out.println("AdapterTest passed: " + checks + " checks (seed 1949)");
     }
 }

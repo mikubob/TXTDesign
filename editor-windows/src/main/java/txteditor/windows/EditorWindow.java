@@ -30,7 +30,7 @@ import java.util.concurrent.ExecutionException;
 import static txteditor.windows.EditorIcon.Kind.*;
 
 public final class EditorWindow extends JFrame {
-    private static final int RECENT_LIMIT = 5;
+    private static final int RECENT_LIMIT = 8;
     private static Properties cachedPrefs;
     final EditorModel model = new EditorModel();
     /**
@@ -53,16 +53,18 @@ public final class EditorWindow extends JFrame {
     private final JLabel position = new JLabel();
     private final JButton zoomLabel = new JButton("100%");
     private final JMenu recentMenu = new JMenu("最近文件");
+    private final JPanel recentBar = new JPanel(new FlowLayout(FlowLayout.LEADING, 4, 0));
     private final Map<LanguageId, JRadioButtonMenuItem> languageItems = new EnumMap<LanguageId, JRadioButtonMenuItem>(LanguageId.class);
     private final List<Path> recent = new ArrayList<Path>();
     private final Properties prefs;
     private final Timer sessionTimer = new Timer(700, event -> persistSession());
+    /** 编辑时防抖重排预览；每次 render 都要重建整篇文档，逐键重排会卡输入。 */
+    private final Timer previewTimer = new Timer(180, event -> renderPreview());
     final JPanel documentTop = surface(new JPanel(new BorderLayout()));
     final JPanel searchDock = surface(new JPanel(new BorderLayout()));
     final EditorBinding binding;
-    private final JScrollPane scroll;
-    private final CardLayout cards = new CardLayout();
-    private final JPanel stage = new JPanel(cards);
+    private final JScrollPane scroll, previewScroll;
+    private final JSplitPane split;
     private final List<Action> actions = new ArrayList<Action>();
     private final List<JComponent> searchControls = new ArrayList<JComponent>();
     private Action undoAction, redoAction, nextAction, replaceAction, zoomInAction, zoomOutAction, themeAction, previewAction;
@@ -76,6 +78,7 @@ public final class EditorWindow extends JFrame {
     private boolean restored;
     private boolean docked;
     private int zoom = 100;
+    private String previewSource;
     private long fileModified;
     private long fileSize;
     private String themeMode = "system";
@@ -163,7 +166,7 @@ public final class EditorWindow extends JFrame {
         brand.add(mark, BorderLayout.WEST); brand.add(titles, BorderLayout.CENTER);
         heading.add(brand, BorderLayout.CENTER);
         heading.add(button(themeAction, THEME, false), BorderLayout.EAST);
-        JPanel top = new JPanel(new BorderLayout(0, 16)); top.add(heading, BorderLayout.NORTH);
+        JPanel top = new JPanel(new BorderLayout(0, 10)); top.add(heading, BorderLayout.NORTH);
         JPanel toolbar = new JPanel(); toolbar.setLayout(new BoxLayout(toolbar, BoxLayout.X_AXIS));
         JButton newButton = button(newAction, NEW, false);
         // 工具栏放不下类型后缀，按钮与无障碍名称统一叫「新建」。
@@ -186,7 +189,11 @@ public final class EditorWindow extends JFrame {
         toolbar.add(previewToggle); toolbar.add(Box.createHorizontalStrut(6));
         JButton searchButton = button(showReplace, SEARCH, false); searchButton.setText("查找 / 替换");
         searchToggle = searchButton;
-        toolbar.add(searchButton); top.add(toolbar, BorderLayout.SOUTH); shell.add(top, BorderLayout.NORTH);
+        toolbar.add(searchButton); top.add(toolbar, BorderLayout.CENTER);
+        // 最近文件挂在标题下常驻一行，像记事本的标签条一样随时点开。
+        recentBar.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        top.add(recentBar, BorderLayout.SOUTH);
+        shell.add(top, BorderLayout.NORTH);
 
         JPanel document = surface(new JPanel(new BorderLayout()));
         document.putClientProperty("FlatLaf.style", "border: 1,1,1,1,$Component.borderColor,1,12");
@@ -234,10 +241,17 @@ public final class EditorWindow extends JFrame {
         };
         previewScroll.setBorder(BorderFactory.createEmptyBorder());
         previewScroll.getVerticalScrollBar().setUnitIncrement(UIScale.scale(24));
-        stage.add(scroll, "source");
-        stage.add(previewScroll, "preview");
+        // 预览固定占右侧一块（可拖动分隔条调整），窗口变大时多出的宽度留给源码。
+        previewScroll.setPreferredSize(new Dimension(UIScale.scale(420), 0));
+        this.previewScroll = previewScroll;
+        // 预览是源码右侧的分屏而不是替换：边写边看，右侧为空时源码独占整行。
+        split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, scroll, null);
+        split.setBorder(BorderFactory.createEmptyBorder());
+        split.setDividerSize(UIScale.scale(6));
+        split.setResizeWeight(0);
+        split.setContinuousLayout(true);
         JPanel body = new JPanel(new BorderLayout());
-        body.add(stage, BorderLayout.CENTER); body.add(searchDock, BorderLayout.EAST);
+        body.add(split, BorderLayout.CENTER); body.add(searchDock, BorderLayout.EAST);
         document.add(body, BorderLayout.CENTER); shell.add(document, BorderLayout.CENTER);
         footer = new JPanel(new BorderLayout(12, 0));
         footer.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
@@ -280,6 +294,7 @@ public final class EditorWindow extends JFrame {
 
     @Override public void dispose() {
         sessionTimer.stop();
+        previewTimer.stop();
         super.dispose();
     }
 
@@ -441,7 +456,8 @@ public final class EditorWindow extends JFrame {
         themeAction.putValue(Action.NAME, "主题：" + themeName(themeMode));
         prefs.setProperty("theme", themeMode);
         binding.painter.applyTheme(FlatLaf.isLafDark());
-        if (previewMode) preview.render(model.getText(), FlatLaf.isLafDark());
+        previewSource = null; // 深浅色切换必须重排一次预览
+        if (previewMode) renderPreview();
     }
 
     private void cycleTheme() {
@@ -466,17 +482,29 @@ public final class EditorWindow extends JFrame {
         if (zoomOutAction != null) zoomOutAction.setEnabled(!busy && zoom > 70);
     }
 
-    /** 源码 / 预览切换；两侧文档互不影响，所以光标、选区与滚动位置天然保留。 */
+    /** 源码 / 预览分屏：预览只是右侧多一块，光标、选区与输入都不受影响。 */
     private void setPreview(boolean on) {
         if (on && language != LanguageId.MARKDOWN) { updateState(); return; }
         binding.finishInput();
         previewMode = on;
-        if (on) { preview.render(model.getText(), FlatLaf.isLafDark()); cards.show(stage, "preview"); preview.pane().requestFocusInWindow(); }
-        else { cards.show(stage, "source"); area.requestFocusInWindow(); }
+        if (on) { renderPreview(); split.setRightComponent(previewScroll); }
+        else split.setRightComponent(null);
         previewToggle.setSelected(on);
-        previewAction.putValue(Action.NAME, on ? "返回源码" : "预览 Markdown");
+        previewAction.putValue(Action.NAME, on ? "关闭预览" : "预览 Markdown");
         preview.pane().getAccessibleContext().setAccessibleDescription(on ? "预览已展开" : "预览已收起");
+        area.requestFocusInWindow();
         updateState();
+    }
+
+    /** 实时预览：文本没变就不重排，重建后把滚动位置放回原处。 */
+    private void renderPreview() {
+        String text = model.getText();
+        if (text.equals(previewSource)) return;
+        previewSource = text;
+        JScrollBar bar = previewScroll.getVerticalScrollBar();
+        int value = bar.getValue();
+        preview.render(text, FlatLaf.isLafDark());
+        SwingUtilities.invokeLater(() -> bar.setValue(value));
     }
 
     /** 识别到新语言：只在真的变了时才通知高亮器，避免打开文件时白扫一遍旧文本。 */
@@ -582,7 +610,7 @@ public final class EditorWindow extends JFrame {
                     fileModified = EditorStore.modifiedTime(chosen); fileSize = size;
                     addRecent(chosen); EditorStore.clearSession(); restored = false;
                     adoptLanguage(detectLanguage(chosen, text));
-                    if (previewMode) preview.render(text, FlatLaf.isLafDark());
+                    if (previewMode) renderPreview();
                     binding.refresh(); area.setCaretPosition(0);
                     success = true;
                 } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); showError("打开被中断；原内容保留。"); }
@@ -608,7 +636,7 @@ public final class EditorWindow extends JFrame {
 
     private void newDocument(LanguageId type) {
         model.load(""); binding.endGroup();
-        file = null; readOnly = false; restored = false;
+        file = null; readOnly = false; restored = false; previewSource = null;
         adoptLanguage(type);
         setPreview(false);
         area.setEditable(!busy);
@@ -701,16 +729,33 @@ public final class EditorWindow extends JFrame {
         rebuildRecent();
     }
 
+    /** 菜单与顶部标签条共用同一份最近文件列表；缺失的文件置灰保留，方便用户把文件找回来。 */
     private void rebuildRecent() {
-        recentMenu.removeAll();
+        recentMenu.removeAll(); recentBar.removeAll();
         for (final Path path : recent) {
-            JMenuItem item = new JMenuItem(path.getFileName() == null ? path.toString() : path.getFileName().toString());
+            String name = path.getFileName() == null ? path.toString() : path.getFileName().toString();
+            boolean exists = Files.exists(path);
+            JMenuItem item = new JMenuItem(name);
             item.setToolTipText(path.toString());
-            item.setEnabled(Files.exists(path)); // 缺失的文件置灰而不是报错
+            item.setEnabled(exists);
             item.addActionListener(event -> leave(() -> openPath(path)));
             recentMenu.add(item);
+            JButton chip = new JButton(ellipsis(name));
+            chip.putClientProperty("JButton.buttonType", "toolbar");
+            chip.setToolTipText(exists ? path.toString() : path + "（文件已移动或删除）");
+            chip.setEnabled(exists);
+            chip.getAccessibleContext().setAccessibleName(name);
+            chip.getAccessibleContext().setAccessibleDescription("打开最近文件 " + name);
+            chip.addActionListener(event -> leave(() -> openPath(path)));
+            recentBar.add(chip);
         }
         recentMenu.setEnabled(!recent.isEmpty());
+        recentBar.setVisible(!recent.isEmpty());
+        recentBar.revalidate(); recentBar.repaint();
+    }
+
+    private static String ellipsis(String name) {
+        return name.length() <= 14 ? name : name.substring(0, 13) + "…";
     }
 
     private SessionSnapshot snapshot() {
@@ -779,6 +824,7 @@ public final class EditorWindow extends JFrame {
         restored = false;
         updateState();
         sessionTimer.restart();
+        if (previewMode) previewTimer.restart();
     }
 
     private void setBusy(boolean value) {
