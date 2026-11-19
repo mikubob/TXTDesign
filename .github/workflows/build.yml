@@ -40,7 +40,7 @@ jobs:
       - name: Build and check Windows installer
         shell: pwsh
         run: |
-          $version = '1.5.0'
+          $version = '1.6.0'
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME.TrimStart('v') }
           ./editor-windows/package.ps1 -Version $version
       - name: Collect packages and checksums
@@ -77,6 +77,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
+          if [ -f "docs/release-notes/$TAG.md" ]; then
+            cp "docs/release-notes/$TAG.md" release-notes.md
+          else
           cat > release-notes.md <<'EOF'
           离线 UTF-8 文本编辑器，源码与构建说明见仓库 README。
 
@@ -88,4 +91,5 @@ jobs:
           安卓自动构建使用临时调试证书，不保证与上一版本同签名；覆盖安装前请先保存文档。
           Windows 安装器未使用商业代码签名证书。
           EOF
+          fi
           gh release create "$TAG" dist/* --repo "$GH_REPO" --verify-tag --title "TXTDesign $TAG" --notes-file release-notes.md

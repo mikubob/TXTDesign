@@ -11,12 +11,12 @@
 | 文件 | 用途 |
 | --- | --- |
 | `TXTDesign-android.apk` | Android 8.0 及以上，下载后允许当前来源安装应用 |
-| `TXTDesign-1.5.0.exe` | Windows x64 安装器，自带 Temurin Java 21 运行时，按当前用户安装 |
+| `TXTDesign-1.6.0.exe` | Windows x64 安装器，自带 Temurin Java 21 运行时，按当前用户安装 |
 | `txteditor-windows.jar` | 已安装桌面 Java 8+ 的用户可运行 `java -jar txteditor-windows.jar` |
 | `SHA256SUMS.txt` | 发布附件的 SHA-256 校验值 |
 | `Source code (zip / tar.gz)` | 对应版本的源码和 README，由 GitHub 自动提供 |
 
-安卓包使用演示用调试签名，Windows 安装器未做商业代码签名。首次安装时系统可能要求确认来源。安卓包经 R8 混淆与资源裁剪后约 1.7 MB，Windows 安装器只捆绑实际用到的运行时模块，约 28 MB。当前版本 Android 的 `versionName` 为 1.5，仓库发布版本为 v1.5.0。
+安卓包使用演示用调试签名，Windows 安装器未做商业代码签名。首次安装时系统可能要求确认来源。安卓包经 R8 混淆与资源裁剪后约 1.7 MB，Windows 安装器只捆绑实际用到的运行时模块，约 28 MB。当前版本 Android 的 `versionName` 为 1.6，仓库发布版本为 v1.6.0。
 
 本地安卓签名证书不会上传 GitHub；自动构建会生成临时调试证书，跨次构建可能无法直接覆盖安装。遇到签名冲突时先将文档保存到应用外；卸载会删除应用私有草稿。
 
@@ -72,8 +72,8 @@ powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Test
 Windows 安装器需要可再分发的 **Temurin JDK 21 x64** 和 **WiX 3.14.1**；将 JDK `bin` 以及包含 `candle.exe`、`light.exe` 的 WiX 目录加入 `PATH` 后运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1.5.0
-# 输出：editor-windows/build/installer/TXTDesign-1.5.0.exe
+powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1.6.0
+# 输出：editor-windows/build/installer/TXTDesign-1.6.0.exe
 ```
 
 使用 JDK 自带的 [jpackage](https://docs.oracle.com/en/java/javase/21/jpackage/packaging-tool-user-guide.pdf) 打包；[WiX 官方二进制](https://github.com/wixtoolset/wix3/releases/tag/wix3141rtm)的下载和校验方法也记录在工作流中。捆绑运行时的许可说明保留在安装目录 `runtime/legal/`。
@@ -85,15 +85,15 @@ powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1
 发布新版本时，先更新安卓 `build.gradle` 中的 `versionCode` / `versionName`，再推送三段式版本标签：
 
 ```powershell
-git tag v1.5.0
-git push origin v1.5.0
+git tag v1.6.0
+git push origin v1.6.0
 ```
 
 标签构建成功后，工作流自动创建 GitHub Release，附上 APK、EXE、JAR 和校验清单；GitHub 同时提供对应标签的源码归档。自动发布使用仓库内置 `GITHUB_TOKEN`，无需在源码中放访问令牌。
 
 ## 验证与设计资料
 
-本版重新执行：CoreTest **48,482** 项、TextTest **3,679** 项、DesktopTest **115** 项、GuiTest **633** 项、AdapterTest **7,620** 项、MuMu 模拟器设备回归 **81 + 5** 项，均通过；Android Lint 0 error、APK 签名校验通过。完整的界面截图与验证范围见各模块报告。
+本版重新执行：CoreTest **48,484** 项、TextTest **3,679** 项、DesktopTest **281** 项、GuiTest **699** 项、AdapterTest **7,629** 项，均通过；Android Lint 0 error、APK 签名校验通过。设备侧回归（SAF、输入法、旋转、草稿恢复）最近一次在 MuMu 模拟器上为 **81 + 5** 项通过，本版未重跑，改动只涉及文案资源与按钮状态。完整的界面截图与验证范围见各模块报告。
 
 - [共享核心接口](editor-core/README.md)
 - [多语言高亮与 Markdown 渲染设计](docs/多语言高亮与Markdown渲染设计.md)
