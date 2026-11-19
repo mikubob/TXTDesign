@@ -125,6 +125,10 @@ public final class DesktopTest {
                 check(full.startsWith(piece.text));
                 check(!piece.text.isEmpty() || limit < 3);
             }
+            // 阈值边界：等于上限仍算完整读取，少一个字节就要截断
+            check(!SafeFiles.readForDisplay(large, total).partial);
+            check(SafeFiles.readForDisplay(large, total - 1).partial);
+            eq(full, SafeFiles.readForDisplay(large, total).text);
             eq(16L << 20, EditorStore.limit());
         } finally {
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) { for (Path path : files) Files.deleteIfExists(path); }
@@ -243,7 +247,6 @@ public final class DesktopTest {
             SafeFiles.write(target, "一二三四");
             check(EditorStore.externallyModified(target, modified, size));
             check(!EditorStore.externallyModified(directory.resolve("不存在.txt"), modified, size));
-            eq(16L << 20, EditorStore.limit());
         } finally {
             if (previous == null) System.clearProperty("txteditor.data"); else System.setProperty("txteditor.data", previous);
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) { for (Path path : files) Files.deleteIfExists(path); }

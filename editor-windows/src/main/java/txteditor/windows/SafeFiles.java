@@ -41,7 +41,8 @@ final class SafeFiles {
         int filled = 0;
         try (FileChannel input = FileChannel.open(path, StandardOpenOption.READ)) {
             ByteBuffer buffer = ByteBuffer.wrap(head);
-            while (buffer.hasRemaining()) { if (input.read(buffer) < 0) break; }
+            // FileChannel 允许返回 0，按 0 继续循环会空转
+            while (buffer.hasRemaining()) { if (input.read(buffer) <= 0) break; }
             filled = buffer.position();
         }
         return new Loaded(TextCodec.decodeUtf8(cutAfterCharBoundary(head, filled)), true, size);

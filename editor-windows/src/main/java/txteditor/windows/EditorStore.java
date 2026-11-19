@@ -30,13 +30,16 @@ final class EditorStore {
         return base.resolve("TXTDesign").resolve("session");
     }
 
-    /** 大文件阈值；-Dtxteditor.largeFileLimit 只给测试注入更小的值，正常运行时就是 16 MiB。 */
+    /**
+     * 大文件阈值；-Dtxteditor.largeFileLimit 只给测试注入更小的值，正常运行时就是 16 MiB。
+     * 只接受 0 到 16 MiB 之间的值，免得一个手滑的属性把整份文件重新放进内存。
+     */
     static long limit() {
         String override = System.getProperty("txteditor.largeFileLimit");
         if (override == null) return LARGE_FILE_LIMIT;
         try {
             long value = Long.parseLong(override);
-            return value > 0 ? value : LARGE_FILE_LIMIT;
+            return value > 0 && value < LARGE_FILE_LIMIT ? value : LARGE_FILE_LIMIT;
         } catch (NumberFormatException malformed) { return LARGE_FILE_LIMIT; }
     }
 

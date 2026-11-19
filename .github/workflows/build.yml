@@ -67,6 +67,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 发布说明取自仓库 docs/release-notes/<tag>.md，必须先把仓库取下来
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           name: TXTDesign-packages
@@ -92,4 +94,10 @@ jobs:
           Windows 安装器未使用商业代码签名证书。
           EOF
           fi
-          gh release create "$TAG" dist/* --repo "$GH_REPO" --verify-tag --title "TXTDesign $TAG" --notes-file release-notes.md
+          # 同一标签重跑（修好缺陷后重新打包）时更新已有附件与说明，不新建第二个 Release
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GH_REPO"
+            gh release edit "$TAG" --repo "$GH_REPO" --title "TXTDesign $TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" dist/* --repo "$GH_REPO" --verify-tag --title "TXTDesign $TAG" --notes-file release-notes.md
+          fi

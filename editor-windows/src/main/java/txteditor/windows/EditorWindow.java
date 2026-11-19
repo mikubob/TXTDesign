@@ -48,7 +48,9 @@ public final class EditorWindow extends JFrame {
     LanguageId language = LanguageId.PLAIN;
     boolean previewMode;
     private final JPanel replaceRow = new JPanel(new BorderLayout(10, 0));
-    private final JLabel documentName = new JLabel(), documentPath = new JLabel(), savedState = new JLabel();
+    private final JLabel documentName = new JLabel(), documentPath = new JLabel();
+    /** 只读文档要长期显示“仅开头”，状态栏那行会被统计顶掉，所以放在徽标上。包内可见供测试断言。 */
+    final JLabel savedState = new JLabel();
     private final JLabel searchResult = new JLabel("区分大小写 · 按字面查找 · 末尾自动回绕");
     private final JLabel position = new JLabel();
     private final JButton zoomLabel = new JButton("100%");
@@ -68,8 +70,7 @@ public final class EditorWindow extends JFrame {
     private final List<Action> actions = new ArrayList<Action>();
     private final List<JComponent> searchControls = new ArrayList<JComponent>();
     private Action undoAction, redoAction, nextAction, replaceAction, zoomInAction, zoomOutAction, themeAction, previewAction;
-    /** 只读文档（超过 16 MiB 按只读打开）不写回原文件，保存动作随之禁用；另存为仍可用。包内可见供测试断言。 */
-    Action saveAction;
+    private Action saveAction;
     private JToggleButton previewToggle;
     private JRadioButtonMenuItem themeSystem, themeLight, themeDark;
     private JButton searchToggle;
@@ -620,6 +621,7 @@ public final class EditorWindow extends JFrame {
                 catch (ExecutionException failed) { showError(fileError(failed.getCause())); }
                 finally { setBusy(false); area.requestFocusInWindow(); }
                 if (success && readOnly) {
+                    // 徽标长期挂着“只读 · 仅开头”，这里再给一行即时说明
                     String notice = TextKeys.of(TextKeys.TOO_LARGE_PARTIAL, "16 MiB");
                     status.setText(notice);
                     searchResult.setText(notice);
@@ -655,7 +657,9 @@ public final class EditorWindow extends JFrame {
             JFileChooser chooser = chooser(target, target == null ? language.defaultFileName() : null);
             if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
             target = chooser.getSelectedFile().toPath().toAbsolutePath();
-            if (Files.exists(target) && JOptionPane.showConfirmDialog(this, "覆盖已有文件？\n" + target,
+            if (refusesOverwrite(target)) return;
+            String penalty = readOnly ? "\n\n当前只显示文件开头部分，保存的内容只有这部分。" : "";
+            if (Files.exists(target) && JOptionPane.showConfirmDialog(this, "覆盖已有文件？\n" + target + penalty,
                     "确认覆盖", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
         } else if (EditorStore.externallyModified(target, fileModified, fileSize)) {
             Object[] options = {"覆盖", "另存为"};
@@ -664,6 +668,7 @@ public final class EditorWindow extends JFrame {
             if (answer == 1) { save(true, afterSuccess); return; }
             if (answer != 0) return;
         }
+        if (refusesOverwrite(target)) return;
         final Path chosen = target;
         final String snapshot = model.getText();
         setBusy(true);
@@ -682,6 +687,13 @@ public final class EditorWindow extends JFrame {
                 if (success) afterSuccess.run();
             }
         }.execute();
+    }
+
+    /** 只读文档内存里只有开头部分，覆盖原文件等于删掉其余内容；选择器默认又停在这个文件上。 */
+    private boolean refusesOverwrite(Path target) {
+        if (!readOnly || !target.equals(file)) return false;
+        showError("当前只显示文件开头部分，不能覆盖原文件。\n请另存到其他位置。");
+        return true;
     }
 
     /** 与安卓端一致：保存失败给「另存为 / 继续编辑」两条路。 */
@@ -845,7 +857,8 @@ public final class EditorWindow extends JFrame {
         documentName.setText(name);
         documentPath.setText(file == null ? "保存后将在这里显示文件位置" : file.toString());
         documentPath.setToolTipText(file == null ? "尚未保存到文件" : file.toString());
-        savedState.setText(readOnly ? "只读" : busy ? "文件处理中…" : model.isModified() ? "● 未保存" : file == null ? "新文档" : "已保存");
+        savedState.setText(readOnly ? "只读 · 仅开头" : busy ? "文件处理中…" : model.isModified() ? "● 未保存" : file == null ? "新文档" : "已保存");
+        savedState.setToolTipText(readOnly ? TextKeys.of(TextKeys.TOO_LARGE_PARTIAL, "16 MiB") : null);
         status.setText((restored ? "已恢复上次会话  |  " : "") + (busy ? "文件处理中…  " : "")
                 + model.getCodePointCount() + " 个码点  |  " + model.getLineCount() + " 行  |  "
                 + language.title + "  |  UTF-8 / LF");

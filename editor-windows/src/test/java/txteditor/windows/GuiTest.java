@@ -337,6 +337,7 @@ public final class GuiTest {
         for (int i = 0; i < 40; i++) body.append("中文\n");
         Path large = directory.resolve("大文件.txt");
         Files.write(large, body.toString().getBytes("UTF-8"));
+        String previous = System.getProperty("txteditor.largeFileLimit");
         System.setProperty("txteditor.largeFileLimit", "64");
         try {
             invokeMenu("文件", "打开…"); choose(large);
@@ -345,8 +346,9 @@ public final class GuiTest {
                 check(!window.area.isEditable());
                 // 64 字节落在第 10 行的「中」中间，只读预览退回到完整的 9 行
                 eq(body.substring(0, 27), window.model.getText());
-                eq(txteditor.core.TextKeys.of(txteditor.core.TextKeys.TOO_LARGE_PARTIAL, "16 MiB"), window.status.getText());
-                check(!window.saveAction.isEnabled());          // 不许把截断内容写回原文件
+                // 徽标常驻说明“仅开头”，状态栏那行会被统计覆盖，不能当唯一依据
+                eq("只读 · 仅开头", window.savedState.getText());
+                eq(txteditor.core.TextKeys.of(txteditor.core.TextKeys.TOO_LARGE_PARTIAL, "16 MiB"), window.savedState.getToolTipText());
                 check(!menu("文件", "保存").isEnabled());
                 check(menu("文件", "另存为…").isEnabled());      // 仍有一条另存为的出路
                 return null;
@@ -357,13 +359,18 @@ public final class GuiTest {
                 check(!window.area.getActionMap().get(name).isEnabled());
                 return null;
             });
+            // 另存为选回原文件必须被挡住：内存里只有开头 16 MiB，写回去等于删掉其余内容
+            invokeMenu("文件", "另存为…"); choose(large); clickAnyError();
+            eq(body.toString(), SafeFiles.read(large));
+            edt(() -> { check(window.readOnly); check(!window.area.isEditable()); return null; });
             eq(body.toString(), SafeFiles.read(large));         // 打开后原文件未被改写
         } finally {
-            System.clearProperty("txteditor.largeFileLimit");
+            if (previous == null) System.clearProperty("txteditor.largeFileLimit");
+            else System.setProperty("txteditor.largeFileLimit", previous);
         }
         invokeMenu("文件", "新建", "纯文本（.txt）");
         waitFor(() -> edt(() -> !window.readOnly && window.area.isEditable()));
-        edt(() -> { check(window.saveAction.isEnabled()); return null; });
+        edt(() -> { check(menu("文件", "保存").isEnabled()); return null; });
         // 交还给后续用例：恢复成 Markdown 文档，Ctrl+E 才有预览可切
         JMenu languages = (JMenu) menu("视图", "语言");
         edt(() -> {

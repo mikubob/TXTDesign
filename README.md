@@ -93,7 +93,7 @@ git push origin v1.6.0
 
 ## 验证与设计资料
 
-本版重新执行：CoreTest **48,484** 项、TextTest **3,679** 项、DesktopTest **281** 项、GuiTest **699** 项、AdapterTest **7,629** 项，均通过；Android Lint 0 error、APK 签名校验通过。设备侧回归（SAF、输入法、旋转、草稿恢复）最近一次在 MuMu 模拟器上为 **81 + 5** 项通过，本版未重跑，改动只涉及文案资源与按钮状态。完整的界面截图与验证范围见各模块报告。
+本版重新执行：CoreTest **48,483** 项、TextTest **3,679** 项、DesktopTest **283** 项、GuiTest **702** 项、AdapterTest **7,629** 项，均通过；Android Lint 0 error、APK 签名校验通过。设备侧回归（SAF、输入法、旋转、草稿恢复）最近一次在 MuMu 模拟器上为 **81 + 5** 项通过，本版未重跑，改动只涉及文案资源与按钮状态。完整的界面截图与验证范围见各模块报告。
 
 - [共享核心接口](editor-core/README.md)
 - [多语言高亮与 Markdown 渲染设计](docs/多语言高亮与Markdown渲染设计.md)
