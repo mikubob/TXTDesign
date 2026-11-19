@@ -48,6 +48,8 @@ public final class CoreTest {
         eq("未找到：中文", TextKeys.of(TextKeys.NOT_FOUND, "中文"));
         check(TextKeys.of(TextKeys.EXTERNALLY_MODIFIED, "a.txt").contains("a.txt"));
         eq("文件超过 16 MiB 上限，已按只读方式打开。", TextKeys.of(TextKeys.TOO_LARGE, "16 MiB"));
+        eq("文件超过 16 MiB 上限，仅显示开头部分，已按只读方式打开。", TextKeys.of(TextKeys.TOO_LARGE_PARTIAL, "16 MiB"));
+        eq("文件超过 16 MiB 上限，未打开；当前内容保留。", TextKeys.of(TextKeys.TOO_LARGE_REFUSED, "16 MiB"));
         eq("未知键", TextKeys.of("未知键"));
         SessionSnapshot snapshot = new SessionSnapshot("正文", "正文", "a.txt", 1, 2, 30, "查", "换", true);
         eq("正文", snapshot.text); eq("正文", snapshot.savedText); eq("a.txt", snapshot.fileName);

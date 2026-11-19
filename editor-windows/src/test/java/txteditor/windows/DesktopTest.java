@@ -22,6 +22,7 @@ public final class DesktopTest {
             catch (Exception failure) { throw new RuntimeException(failure); }
         });
         fileTests();
+        displayReadTests();
         sessionTests();
         System.out.println("DesktopTest PASS: " + checks + " checks");
     }
@@ -92,6 +93,39 @@ public final class DesktopTest {
             EditorModel model = new EditorModel(); model.load("原文"); model.replace(0, 2, "保留内容");
             try { SafeFiles.write(directory.resolve("不存在/失败.txt"), model.getText()); throw new AssertionError("expected failure"); }
             catch (IOException expected) { eq("保留内容", model.getText()); check(model.isModified()); }
+        } finally {
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) { for (Path path : files) Files.deleteIfExists(path); }
+            Files.delete(directory);
+        }
+    }
+
+    /** 大文件只读展示：只读开头一段，截断点不能造成“非法 UTF-8”的误判。 */
+    private static void displayReadTests() throws Exception {
+        Path directory = Files.createTempDirectory("txteditor-large-");
+        try {
+            Path small = directory.resolve("small.txt");
+            Files.write(small, "中文😀\n".getBytes("UTF-8"));
+            SafeFiles.Loaded whole = SafeFiles.readForDisplay(small, 16L << 20);
+            eq("中文😀\n", whole.text); check(!whole.partial); eq(11L, whole.size);
+
+            StringBuilder body = new StringBuilder();
+            for (int i = 0; i < 2000; i++) body.append("行").append(i).append("😀\n");
+            String full = body.toString();
+            Path large = directory.resolve("large.txt");
+            Files.write(large, full.getBytes("UTF-8"));
+            long total = Files.size(large);
+            SafeFiles.Loaded head = SafeFiles.readForDisplay(large, 10);
+            check(head.partial); eq(total, head.size);
+            // 前 9 字节是「行0😀\n」，第 10 字节是下一行「行」的首字节，截断后必须退回整字符
+            eq("行0😀\n", head.text);
+            for (int limit = 1; limit <= 40; limit++) {
+                SafeFiles.Loaded piece = SafeFiles.readForDisplay(large, limit);
+                check(piece.partial);
+                check(piece.text.length() <= limit);
+                check(full.startsWith(piece.text));
+                check(!piece.text.isEmpty() || limit < 3);
+            }
+            eq(16L << 20, EditorStore.limit());
         } finally {
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) { for (Path path : files) Files.deleteIfExists(path); }
             Files.delete(directory);
@@ -209,7 +243,7 @@ public final class DesktopTest {
             SafeFiles.write(target, "一二三四");
             check(EditorStore.externallyModified(target, modified, size));
             check(!EditorStore.externallyModified(directory.resolve("不存在.txt"), modified, size));
-            check(!EditorStore.tooLarge(16L << 20)); check(EditorStore.tooLarge((16L << 20) + 1));
+            eq(16L << 20, EditorStore.limit());
         } finally {
             if (previous == null) System.clearProperty("txteditor.data"); else System.setProperty("txteditor.data", previous);
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) { for (Path path : files) Files.deleteIfExists(path); }

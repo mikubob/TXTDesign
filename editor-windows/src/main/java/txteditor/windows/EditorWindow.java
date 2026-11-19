@@ -68,13 +68,15 @@ public final class EditorWindow extends JFrame {
     private final List<Action> actions = new ArrayList<Action>();
     private final List<JComponent> searchControls = new ArrayList<JComponent>();
     private Action undoAction, redoAction, nextAction, replaceAction, zoomInAction, zoomOutAction, themeAction, previewAction;
+    /** 只读文档（超过 16 MiB 按只读打开）不写回原文件，保存动作随之禁用；另存为仍可用。包内可见供测试断言。 */
+    Action saveAction;
     private JToggleButton previewToggle;
     private JRadioButtonMenuItem themeSystem, themeLight, themeDark;
     private JButton searchToggle;
     private JPanel heading, fileHeader, shell, footer;
     private Path file;
     private boolean busy;
-    private boolean readOnly;
+    boolean readOnly;
     private boolean restored;
     private boolean docked;
     private int zoom = 100;
@@ -111,7 +113,7 @@ public final class EditorWindow extends JFrame {
         Action newAction = (Action) newFile.getItem(0).getAction();
         Action openAction = addAction(files, "打开…", "control O", () -> leave(this::chooseOpen));
         files.add(recentMenu);
-        Action saveAction = addAction(files, "保存", "control S", () -> save(false, () -> { }));
+        saveAction = addAction(files, "保存", "control S", () -> save(false, () -> { }));
         addAction(files, "另存为…", "control shift S", () -> save(true, () -> { }));
         files.addSeparator(); addAction(files, "退出", "alt F4", () -> leave(this::shutdown));
         JMenu edit = new JMenu("编辑"); edit.setMnemonic(KeyEvent.VK_E);
@@ -598,16 +600,17 @@ public final class EditorWindow extends JFrame {
     /** 打开一条路径；拖放、最近文件与选择器共用。 */
     private void openPath(Path chosen) {
         setBusy(true);
-        new SwingWorker<String, Void>() {
-            private long size;
-            protected String doInBackground() throws Exception { size = Files.size(chosen); return SafeFiles.read(chosen); }
+        new SwingWorker<SafeFiles.Loaded, Void>() {
+            protected SafeFiles.Loaded doInBackground() throws Exception { return SafeFiles.readForDisplay(chosen, EditorStore.limit()); }
             protected void done() {
                 boolean success = false;
                 try {
-                    String text = get(); model.load(text);
+                    SafeFiles.Loaded loaded = get();
+                    String text = loaded.text;
+                    model.load(text);
                     binding.endGroup();
-                    file = chosen; readOnly = EditorStore.tooLarge(size);
-                    fileModified = EditorStore.modifiedTime(chosen); fileSize = size;
+                    file = chosen; readOnly = loaded.partial;
+                    fileModified = EditorStore.modifiedTime(chosen); fileSize = loaded.size;
                     addRecent(chosen); EditorStore.clearSession(); restored = false;
                     adoptLanguage(detectLanguage(chosen, text));
                     if (previewMode) renderPreview();
@@ -617,8 +620,9 @@ public final class EditorWindow extends JFrame {
                 catch (ExecutionException failed) { showError(fileError(failed.getCause())); }
                 finally { setBusy(false); area.requestFocusInWindow(); }
                 if (success && readOnly) {
-                    status.setText(TextKeys.of(TextKeys.TOO_LARGE, "16 MiB"));
-                    searchResult.setText(TextKeys.of(TextKeys.TOO_LARGE, "16 MiB"));
+                    String notice = TextKeys.of(TextKeys.TOO_LARGE_PARTIAL, "16 MiB");
+                    status.setText(notice);
+                    searchResult.setText(notice);
                 }
             }
         }.execute();
@@ -853,6 +857,7 @@ public final class EditorWindow extends JFrame {
         } catch (RuntimeException invalid) { position.setText(" "); }
         if (undoAction != null) undoAction.setEnabled(!busy && model.canUndo());
         if (redoAction != null) redoAction.setEnabled(!busy && model.canRedo());
+        if (saveAction != null) saveAction.setEnabled(!busy && !readOnly);
         if (previewAction != null) previewAction.setEnabled(!busy && language == LanguageId.MARKDOWN);
         if (previewToggle != null) previewToggle.setEnabled(!busy && language == LanguageId.MARKDOWN);
         for (JRadioButtonMenuItem item : languageItems.values()) item.setEnabled(!busy);

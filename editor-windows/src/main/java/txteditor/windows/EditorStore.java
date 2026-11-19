@@ -30,7 +30,15 @@ final class EditorStore {
         return base.resolve("TXTDesign").resolve("session");
     }
 
-    static boolean tooLarge(long size) { return size > LARGE_FILE_LIMIT; }
+    /** 大文件阈值；-Dtxteditor.largeFileLimit 只给测试注入更小的值，正常运行时就是 16 MiB。 */
+    static long limit() {
+        String override = System.getProperty("txteditor.largeFileLimit");
+        if (override == null) return LARGE_FILE_LIMIT;
+        try {
+            long value = Long.parseLong(override);
+            return value > 0 ? value : LARGE_FILE_LIMIT;
+        } catch (NumberFormatException malformed) { return LARGE_FILE_LIMIT; }
+    }
 
     static void writeSession(SessionSnapshot snapshot) throws IOException {
         StringBuilder out = new StringBuilder(HEADER).append('\n');

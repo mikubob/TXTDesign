@@ -94,7 +94,7 @@ public final class MainActivity extends AppCompatActivity {
         TextWatcher fields = new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             public void onTextChanged(CharSequence s, int start, int before, int count) { }
-            public void afterTextChanged(Editable s) { if (!settingFields) { captureFields(); state.edited(); } }
+            public void afterTextChanged(Editable s) { if (!settingFields) { captureFields(); state.edited(); updateFindButtons(); } }
         };
         pattern.addTextChangedListener(fields); replacement.addTextChangedListener(fields);
         findViewById(R.id.files).setOnClickListener(this::filesMenu);
@@ -151,18 +151,20 @@ public final class MainActivity extends AppCompatActivity {
         MaterialButton toggle = findViewById(R.id.replace_toggle);
         toggle.setText(replacing ? R.string.hide_replace : R.string.show_replace);
         toggle.setIconResource(replacing ? R.drawable.ic_collapse : R.drawable.ic_expand);
-        ViewCompat.setStateDescription(findViewById(R.id.search_toggle), state.search ? "已展开" : "已收起");
-        ViewCompat.setStateDescription(toggle, replacing ? "已展开" : "已收起");
+        ViewCompat.setStateDescription(findViewById(R.id.search_toggle), getString(state.search ? R.string.state_expanded : R.string.state_collapsed));
+        ViewCompat.setStateDescription(toggle, getString(replacing ? R.string.state_expanded : R.string.state_collapsed));
         findViewById(R.id.search_panel).post(this::fitSearchPanel);
         int[] controls = {R.id.save, R.id.files, R.id.search_toggle, R.id.close_search, R.id.replace_toggle, R.id.find_next, R.id.replace_one, R.id.pattern, R.id.replacement, R.id.editor, R.id.mode_source, R.id.mode_preview};
         for (int id : controls) findViewById(id).setEnabled(!state.busy);
+        updateFindButtons();
         findViewById(R.id.undo).setEnabled(!state.busy && state.core.canUndo());
         findViewById(R.id.redo).setEnabled(!state.busy && state.core.canRedo());
         if (!state.message.isEmpty()) {
             String message = state.message; state.message = "";
             boolean failed = state.saveFailed; state.saveFailed = false;
-            if (failed) new MaterialAlertDialogBuilder(this).setTitle("保存未完成")
-                    .setMessage(message).setPositiveButton("另存为", (d, w) -> save(true)).setNegativeButton("继续编辑", null).show();
+            if (failed) new MaterialAlertDialogBuilder(this).setTitle(R.string.save_incomplete)
+                    .setMessage(message).setPositiveButton(R.string.save_as, (d, w) -> save(true))
+                    .setNegativeButton(R.string.continue_editing, null).show();
             else Toast.makeText(this, message, Toast.LENGTH_LONG).show();
         }
         if (!state.busy && state.readyAction != EditorViewModel.NONE) {
@@ -296,22 +298,22 @@ public final class MainActivity extends AppCompatActivity {
     private void filesMenu(View anchor) {
         editor.sync(true);
         PopupMenu menu = new PopupMenu(this, anchor);
-        menu.getMenu().add(0, 1, 0, "新建…"); menu.getMenu().add(0, 2, 1, "打开");
+        menu.getMenu().add(0, 1, 0, R.string.new_document_item); menu.getMenu().add(0, 2, 1, R.string.open_item);
         // 最近打开按时间倒序（RecentFiles 写入时已置顶），直接续用上次的 SAF 授权。
         final java.util.List<RecentFiles.Entry> recents = RecentFiles.read(new java.io.File(getFilesDir(), RecentFiles.NAME));
         if (!recents.isEmpty()) {
-            android.view.SubMenu recent = menu.getMenu().addSubMenu(0, 9, 2, "最近打开");
+            android.view.SubMenu recent = menu.getMenu().addSubMenu(0, 9, 2, R.string.recent_files);
             for (int i = 0; i < recents.size(); i++) recent.add(0, 100 + i, i, recents.get(i).name);
         }
-        menu.getMenu().add(0, 3, 3, "另存为"); menu.getMenu().add(0, 4, 4, "关闭");
+        menu.getMenu().add(0, 3, 3, R.string.save_as); menu.getMenu().add(0, 4, 4, R.string.close_document);
         if (findViewById(R.id.edit_actions).getVisibility() == View.GONE) {
             if (!isPreview()) {
-                menu.getMenu().add(0, 5, 5, "撤销").setEnabled(state.core.canUndo());
-                menu.getMenu().add(0, 6, 6, "重做").setEnabled(state.core.canRedo());
-                menu.getMenu().add(0, 7, 7, state.search ? "关闭查找" : "查找与替换");
+                menu.getMenu().add(0, 5, 5, R.string.undo).setEnabled(state.core.canUndo());
+                menu.getMenu().add(0, 6, 6, R.string.redo).setEnabled(state.core.canRedo());
+                menu.getMenu().add(0, 7, 7, state.search ? R.string.search_panel_close : R.string.search_panel_open);
             }
             if (state.language == LanguageId.MARKDOWN) {
-                menu.getMenu().add(0, 8, 8, isPreview() ? "关闭预览" : "预览");
+                menu.getMenu().add(0, 8, 8, isPreview() ? R.string.preview_hide : R.string.preview_show);
             }
         }
         menu.setOnMenuItemClickListener(item -> {
@@ -340,8 +342,8 @@ public final class MainActivity extends AppCompatActivity {
     private void newTypeDialog() {
         LanguageId[] types = LanguageId.values();
         String[] labels = new String[types.length];
-        for (int i = 0; i < types.length; i++) labels[i] = types[i].title + "（" + types[i].defaultSuffix + "）";
-        new MaterialAlertDialogBuilder(this).setTitle("新建文档")
+        for (int i = 0; i < types.length; i++) labels[i] = getString(R.string.new_type_item, types[i].title, types[i].defaultSuffix);
+        new MaterialAlertDialogBuilder(this).setTitle(R.string.new_document_title)
                 .setItems(labels, (dialog, which) -> { newType = types[which]; guard(EditorViewModel.NEW); }).show();
     }
 
@@ -351,10 +353,17 @@ public final class MainActivity extends AppCompatActivity {
         editor.render(); captureFields(); state.edited(); refresh();
     }
 
+    /** 空查找词时禁用「下一处 / 替换」，与桌面端一致；输入法的直接提交仍由 find() 兜住。 */
+    private void updateFindButtons() {
+        boolean ready = !state.busy && !state.pattern.isEmpty();
+        findViewById(R.id.find_next).setEnabled(ready);
+        findViewById(R.id.replace_one).setEnabled(ready);
+    }
+
     private void find(boolean replace) {
         editor.sync(true); captureFields();
         String needle = state.pattern;
-        if (needle.isEmpty()) { Toast.makeText(this, "请输入查找词", Toast.LENGTH_SHORT).show(); return; }
+        if (needle.isEmpty()) { Toast.makeText(this, R.string.need_pattern, Toast.LENGTH_SHORT).show(); return; }
         try {
             int start = state.core.getSelectionStart(), end = state.core.getSelectionEnd();
             if (!replace || !state.core.getText().substring(start, end).equals(needle)) {
@@ -371,9 +380,9 @@ public final class MainActivity extends AppCompatActivity {
         if (state.busy) return;
         editor.sync(true); captureFields();
         if (!state.core.isModified()) { execute(action); return; }
-        new MaterialAlertDialogBuilder(this).setTitle("保存更改？").setMessage(state.name + " 有未保存的内容")
-                .setPositiveButton("保存", (d, w) -> { state.afterSave = action; save(false); })
-                .setNegativeButton("放弃", (d, w) -> execute(action)).setNeutralButton("取消", null).show();
+        new MaterialAlertDialogBuilder(this).setTitle(R.string.leave_title).setMessage(getString(R.string.leave_message, state.name))
+                .setPositiveButton(R.string.save, (d, w) -> { state.afterSave = action; save(false); })
+                .setNegativeButton(R.string.discard, (d, w) -> execute(action)).setNeutralButton(R.string.cancel, null).show();
     }
 
     private void execute(int action) {
@@ -403,7 +412,7 @@ public final class MainActivity extends AppCompatActivity {
         try { startActivityForResult(intent, save ? PICK_SAVE : PICK_OPEN); }
         catch (ActivityNotFoundException error) {
             state.afterSave = EditorViewModel.NONE;
-            Toast.makeText(this, "系统没有可用的文件选择器", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, R.string.no_file_picker, Toast.LENGTH_LONG).show();
         }
     }
 

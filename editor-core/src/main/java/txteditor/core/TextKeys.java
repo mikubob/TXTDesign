@@ -7,6 +7,10 @@ public final class TextKeys {
     public static final String NOT_FOUND = "search.notFound";
     public static final String EXTERNALLY_MODIFIED = "file.externallyModified";
     public static final String TOO_LARGE = "file.tooLarge";
+    /** 超限且只读取了开头部分时使用；文案必须说明显示的不是完整内容。 */
+    public static final String TOO_LARGE_PARTIAL = "file.tooLargePartial";
+    /** 超限且不能按只读打开时使用；文案必须说明文件没有被打开。 */
+    public static final String TOO_LARGE_REFUSED = "file.tooLargeRefused";
 
     private TextKeys() { }
 
@@ -18,6 +22,8 @@ public final class TextKeys {
         else if (NOT_FOUND.equals(key)) template = "未找到：%s";
         else if (EXTERNALLY_MODIFIED.equals(key)) template = "文件已被其他程序修改：%s";
         else if (TOO_LARGE.equals(key)) template = "文件超过 %s 上限，已按只读方式打开。";
+        else if (TOO_LARGE_PARTIAL.equals(key)) template = "文件超过 %s 上限，仅显示开头部分，已按只读方式打开。";
+        else if (TOO_LARGE_REFUSED.equals(key)) template = "文件超过 %s 上限，未打开；当前内容保留。";
         else return args.length == 0 ? key : key + "：" + args[0];
         return args.length == 0 ? template : String.format(template, args);
     }

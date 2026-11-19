@@ -59,7 +59,7 @@ final class EditorViewModel extends ViewModel {
                     > Math.max(draftFile.lastModified(), new File(draftFile + ".bak").lastModified()) ? recoveryFile : draftFile;
             if (candidate.exists() || new File(candidate + ".bak").exists()) {
                 try { result = DraftStore.read(candidate); }
-                catch (Exception failure) { error = "草稿读取失败，原副本仍保留：" + detail(failure); }
+                catch (Exception failure) { error = app.getString(R.string.draft_read_failed, detail(failure)); }
             }
             final DraftFormat.Decoded restored = result; final String problem = error;
             main.post(() -> {
@@ -72,7 +72,7 @@ final class EditorViewModel extends ViewModel {
                     replacement = draft.replacement; search = draft.searchOpen; scroll = draft.scroll;
                     language = LanguageId.parse(draft.language);
                     viewMode = language == LanguageId.MARKDOWN && draft.viewMode == PREVIEW ? PREVIEW : SOURCE;
-                    message = "已恢复本地草稿（编辑历史从此处重新记录）";
+                    message = app.getString(R.string.draft_restored);
                 } else message = problem;
                 documentVersion++; textVersion++; busy = false; notifyChange();
             });
@@ -94,7 +94,7 @@ final class EditorViewModel extends ViewModel {
         SessionSnapshot draft = snapshot(); String target = uri;
         io.execute(() -> {
             try { DraftStore.write(draftFile, draft, target); }
-            catch (Exception error) { main.post(() -> { message = "本地草稿保存失败：" + detail(error); notifyChange(); }); }
+            catch (Exception error) { main.post(() -> { message = app.getString(R.string.draft_save_failed, detail(error)); notifyChange(); }); }
         });
     }
 
@@ -114,12 +114,13 @@ final class EditorViewModel extends ViewModel {
             try {
                 String text;
                 try (InputStream in = app.getContentResolver().openInputStream(target)) {
-                    if (in == null) throw new IOException("无法读取所选文件");
+                    if (in == null) throw new IOException(app.getString(R.string.cannot_read_file));
                     ByteArrayOutputStream bytes = new ByteArrayOutputStream();
                     byte[] buffer = new byte[8192]; int count;
                     while ((count = in.read(buffer)) != -1) {
                         // shortcut: 首版针对小文本，超过 16 MiB 时需分页或流式编辑器。
-                        if (bytes.size() + count > 16 * 1024 * 1024) throw new TooLarge(TextKeys.of(TextKeys.TOO_LARGE, "16 MiB"));
+                        if (bytes.size() + count > 16 * 1024 * 1024)
+                            throw new TooLarge(TextKeys.of(TextKeys.TOO_LARGE_REFUSED, "16 MiB"));
                         bytes.write(buffer, 0, count);
                     }
                     text = TextCodec.decodeUtf8(bytes.toByteArray());
@@ -131,7 +132,7 @@ final class EditorViewModel extends ViewModel {
                 main.post(() -> {
                     core.load(text); saved = text; uri = target.toString(); name = filename; scroll = 0;
                     language = detected; viewMode = SOURCE;
-                    documentVersion++; textVersion++; busy = false; message = "已打开 UTF-8 文本"; persist(); notifyChange();
+                    documentVersion++; textVersion++; busy = false; message = app.getString(R.string.opened_utf8); persist(); notifyChange();
                 });
             } catch (TooLarge error) {
                 main.post(() -> {
@@ -140,7 +141,7 @@ final class EditorViewModel extends ViewModel {
             } catch (SecurityException denied) {
                 // 最近文件重开时授权可能已失效，提示重新选择而不是报一堆堆栈。
                 main.post(() -> {
-                    busy = false; message = "没有读取该文件的权限，请在「打开」里重新选择"; notifyChange();
+                    busy = false; message = app.getString(R.string.no_read_permission); notifyChange();
                 });
             } catch (CharacterCodingException error) {
                 main.post(() -> {
@@ -148,7 +149,7 @@ final class EditorViewModel extends ViewModel {
                 });
             } catch (Exception error) {
                 main.post(() -> {
-                    busy = false; message = "打开失败：" + detail(error); notifyChange();
+                    busy = false; message = app.getString(R.string.open_failed, detail(error)); notifyChange();
                 });
             }
         });
@@ -164,7 +165,7 @@ final class EditorViewModel extends ViewModel {
                 byte[] bytes = TextCodec.encodeUtf8(draft.text);
                 ContentResolver resolver = app.getContentResolver();
                 try (OutputStream out = resolver.openOutputStream(target, "wt")) {
-                    if (out == null) throw new IOException("文档提供者未返回输出流");
+                    if (out == null) throw new IOException(app.getString(R.string.no_output_stream));
                     out.write(bytes); out.flush();
                 }
                 String filename = displayName(target);
@@ -174,7 +175,7 @@ final class EditorViewModel extends ViewModel {
                     // 另存为可能改后缀：认出新语言，没后缀时保留原语言。
                     LanguageId byName = LanguageId.forFileName(filename);
                     if (byName != LanguageId.PLAIN) language = byName;
-                    busy = false; message = "已保存 UTF-8 文本";
+                    busy = false; message = app.getString(R.string.saved_utf8);
                     readyAction = afterSave; afterSave = NONE;
                     persist(); io.execute(() -> DraftStore.delete(recoveryFile)); notifyChange();
                 });
@@ -208,7 +209,7 @@ final class EditorViewModel extends ViewModel {
                 String result = cursor.getString(0); if (result != null && !result.isEmpty()) return result;
             }
         } catch (RuntimeException ignored) { /* 名称查询失败不影响已经完成的读写。 */ }
-        return "文档.txt";
+        return app.getString(R.string.default_document_name);
     }
 
     private static String detail(Exception error) {

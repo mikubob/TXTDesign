@@ -85,6 +85,7 @@ public final class GuiTest {
             previews(robot);
             sourceHighlighting(directory, robot);
             markdownPreview(directory, robot);
+            readOnlyLargeFile(directory);
             sessionRestore();
             System.out.println("GuiTest PASS: " + checks + " checks; scale=" + UIScale.getUserScaleFactor() + "; previews=build/preview-*.png");
         } finally {
@@ -325,6 +326,53 @@ public final class GuiTest {
         });
         edt(() -> { check(menu("视图", "预览 Markdown").isEnabled()); return null; });
         System.out.println("GuiTest: language detection, preview toggle, zoom and theme in preview checked");
+    }
+
+    /**
+     * W6：超过阈值的文件只读展示，编辑器与保存入口一起关掉。
+     * 阈值经 -Dtxteditor.largeFileLimit 缩到 64 字节，避免测试真的要造一个 16 MiB 文档。
+     */
+    private static void readOnlyLargeFile(Path directory) throws Exception {
+        StringBuilder body = new StringBuilder();
+        for (int i = 0; i < 40; i++) body.append("中文\n");
+        Path large = directory.resolve("大文件.txt");
+        Files.write(large, body.toString().getBytes("UTF-8"));
+        System.setProperty("txteditor.largeFileLimit", "64");
+        try {
+            invokeMenu("文件", "打开…"); choose(large);
+            waitFor(() -> edt(() -> window.readOnly));
+            edt(() -> {
+                check(!window.area.isEditable());
+                // 64 字节落在第 10 行的「中」中间，只读预览退回到完整的 9 行
+                eq(body.substring(0, 27), window.model.getText());
+                eq(txteditor.core.TextKeys.of(txteditor.core.TextKeys.TOO_LARGE_PARTIAL, "16 MiB"), window.status.getText());
+                check(!window.saveAction.isEnabled());          // 不许把截断内容写回原文件
+                check(!menu("文件", "保存").isEnabled());
+                check(menu("文件", "另存为…").isEnabled());      // 仍有一条另存为的出路
+                return null;
+            });
+            edt(() -> {
+                // Swing 只有 Action 为 enabled 时才响应按键，这里断言的就是 Ctrl+S 会不会触发
+                Object name = window.area.getInputMap().get(KeyStroke.getKeyStroke("control S"));
+                check(!window.area.getActionMap().get(name).isEnabled());
+                return null;
+            });
+            eq(body.toString(), SafeFiles.read(large));         // 打开后原文件未被改写
+        } finally {
+            System.clearProperty("txteditor.largeFileLimit");
+        }
+        invokeMenu("文件", "新建", "纯文本（.txt）");
+        waitFor(() -> edt(() -> !window.readOnly && window.area.isEditable()));
+        edt(() -> { check(window.saveAction.isEnabled()); return null; });
+        // 交还给后续用例：恢复成 Markdown 文档，Ctrl+E 才有预览可切
+        JMenu languages = (JMenu) menu("视图", "语言");
+        edt(() -> {
+            for (int i = 0; i < languages.getItemCount(); i++)
+                if (languages.getItem(i).getText().equals("Markdown")) languages.getItem(i).doClick();
+            return null;
+        });
+        waitFor(() -> edt(() -> window.language == txteditor.core.text.LanguageId.MARKDOWN));
+        System.out.println("GuiTest: large file opened read-only without whole-file load checked");
     }
 
     private static void previews(Robot robot) throws Exception {
