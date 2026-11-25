@@ -1,5 +1,13 @@
 # Windows 现代界面改造验证记录
 
+## v1.7.0 回归（2026-11-25）
+
+- `powershell -ExecutionPolicy Bypass -File .\editor-core\build.ps1` 通过。CoreTest 48,494 项，TextTest 3,693 项。包含向前查找回绕、重叠计数、末尾空行、预览降级及长行代理项边界。
+- `powershell -ExecutionPolicy Bypass -File .\editor-windows\build.ps1 -GuiTest` 通过。DesktopTest 283 项，GuiTest 在默认 125% 和指定 150% 缩放下各通过 755 项，覆盖保存失败后在弹窗内直接另存。125% 运行的 AWT 候选窗口抛出 `WInputMethod.openCandidateWindow` 空指针，回归断言仍全部通过。
+- `powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1.7.0` 生成 NSIS 安装程序。隔离目录安装后，核对 JAR、运行时和快捷方式，原生启动器打开编辑器窗口。卸载清除安装文件和快捷方式，保留安装目录中的额外测试文件。
+- Windows 真人中文候选输入及跨显示器缩放未复验。
+
+
 日期：2026-10-28。环境：Windows 11 amd64，JDK 21.0.9+7-LTS-338。最终源码以 `--release 8` 编译；本次仅写入 `editor-windows/`，共享核心源码、安卓和根目录文档只读。
 
 ## 最终构建与回归

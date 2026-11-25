@@ -27,20 +27,13 @@ jobs:
         run: sdkmanager 'platforms;android-35' 'build-tools;36.0.0'
       - name: Build and check Android
         run: ./editor-android/build.ps1 -Test
-      - name: Prepare WiX 3.14.1
+      - name: Install NSIS 3.13
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $zip = Join-Path $env:RUNNER_TEMP 'wix.zip'
-          $wix = Join-Path $env:RUNNER_TEMP 'wix'
-          Invoke-WebRequest 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip' -OutFile $zip
-          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne '6AC824E1642D6F7277D0ED7EA09411A508F6116BA6FAE0AA5F2C7DAA2FF43D31') { throw 'WiX checksum mismatch' }
-          Expand-Archive -LiteralPath $zip -DestinationPath $wix
-          $wix | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        run: choco install nsis --version=3.13.0 --yes --no-progress
       - name: Build and check Windows installer
         shell: pwsh
         run: |
-          $version = '1.6.0'
+          $version = '1.7.0'
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME.TrimStart('v') }
           ./editor-windows/package.ps1 -Version $version
       - name: Collect packages and checksums

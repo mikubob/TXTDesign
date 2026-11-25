@@ -13,3 +13,5 @@ Invoke-WebRequest https://repo.maven.apache.org/maven2/com/formdev/flatlaf/3.7.2
 ```
 
 构建校验 SHA-256，并将类、资源、许可和原生库合并到应用 JAR，不需要用户单独配置 classpath。
+
+NSIS 3.13 仅用于构建 Windows 安装器，仓库不分发编译器文件。CI 使用固定的 Chocolatey `nsis 3.13.0` 包，下载取得的官方安装文件由该包校验。[NSIS 3.13](https://sourceforge.net/projects/nsis/files/NSIS%203/3.13/) · [Chocolatey 固定版本](https://community.chocolatey.org/packages/nsis/3.13.0)

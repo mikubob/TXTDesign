@@ -9,3 +9,5 @@ FlatLaf 3.7.2 — Copyright 2019–2026 FormDev Software GmbH / Karl Tauber and 
 - 没有引入 FlatLaf Extras、额外图标库或字体包；工具栏线条图标由本模块实现。
 
 Windows EXE 安装器还包含由 Eclipse Temurin JDK 21 生成的运行时，按 GPLv2 with Classpath Exception 及各组件的第三方许可再分发。完整运行时许可保留在安装目录 `runtime/legal/`；项目及源码入口：https://adoptium.net/ 、https://github.com/adoptium/temurin21-binaries 。JAR 版本不包含 Java 运行时。
+
+Windows 安装向导使用 NSIS 3.13 生成。NSIS 安装器程序通常按 zlib/libpng 许可分发，压缩组件另有条款。工具由构建环境安装，仓库仅保存 TXTDesign 的安装脚本。许可与来源见 [NSIS 官方许可](https://nsis.sourceforge.io/License) 和 [NSIS 3.13 发布文件](https://sourceforge.net/projects/nsis/files/NSIS%203/3.13/)。
