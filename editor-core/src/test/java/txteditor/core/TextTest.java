@@ -22,7 +22,36 @@ public final class TextTest {
         incremental();
         markdown();
         markdownLimits();
+        navigation();
         System.out.println("TextTest " + checks + " checks passed");
+    }
+
+    private static void navigation() {
+        SyntaxHighlighter syntax = new SyntaxHighlighter();
+        syntax.setLanguage(LanguageId.JAVA);
+        String code = "{\n  String value = \"}\"; // }\n  /* ( */ call(array[0]);\n}";
+        syntax.load(code);
+        int[] pair = syntax.brackets().near(1);
+        eq(0, pair[0]);
+        eq(code.length() - 1, pair[1]);
+        eq("[0, 3]", java.util.Arrays.toString(syntax.brackets().fold(code.indexOf("call"))));
+        eq(0, syntax.brackets().near(code.indexOf('}', 1)).length);
+        eq(0, syntax.brackets().near(code.indexOf('(')).length);
+        syntax.load("([)]");
+        eq(0, syntax.brackets().near(1).length);
+        MdDocument md = MdParser.parse("# A\n\nBody\n\n### B");
+        eq(java.util.Arrays.asList(0, 2), md.headings());
+        eq(1, md.blockAt(9));
+        eq(2, md.blockAt(md.text().length()));
+        eq("　　B", md.headingLabel(2));
+        String longFence = "````\n```\ncode\n````\n# heading";
+        MdDocument fenced = MdParser.parse(longFence);
+        eq("```\ncode", fenced.source(0));
+        eq(java.util.Arrays.asList(1), fenced.headings());
+        syntax.setLanguage(LanguageId.MARKDOWN);
+        syntax.load(longFence);
+        eq(4, (int) syntax.stateAt(2));
+        eq(0, (int) syntax.stateAt(4));
     }
 
     private static void languages() {

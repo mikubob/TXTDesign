@@ -41,6 +41,24 @@ public final class Kmp {
         return countOnly ? count : previous >= 0 ? previous : last;
     }
 
+    static int replaceAll(CharSequence text, String pattern, String replacement, StringBuilder out) {
+        int[] prefix = prefix(pattern);
+        int count = 0, copied = 0;
+        for (int i = 0, j = 0; i < text.length(); i++) {
+            char current = text.charAt(i);
+            while (j > 0 && current != pattern.charAt(j)) j = prefix[j - 1];
+            if (current == pattern.charAt(j)) j++;
+            if (j == pattern.length()) {
+                if (out != null) out.append(text, copied, i - j + 1).append(replacement);
+                copied = i + 1;
+                count++;
+                j = 0;
+            }
+        }
+        if (out != null && count > 0) out.append(text, copied, text.length());
+        return count;
+    }
+
     private static int[] prefix(String pattern) {
         if (pattern.isEmpty()) throw new IllegalArgumentException("查找词不能为空");
         int[] prefix = new int[pattern.length()];

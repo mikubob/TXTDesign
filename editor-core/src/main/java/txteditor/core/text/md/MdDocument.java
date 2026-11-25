@@ -47,6 +47,25 @@ public final class MdDocument {
     public String listPrefix(int block) { return listPrefix[block]; }
     public boolean checked(int block) { return checked[block]; }
 
+    /** 空白间隔归到前一块，开头空白归到第一块。 */
+    public int blockAt(int offset) {
+        if (count == 0) return -1;
+        int index = java.util.Arrays.binarySearch(start, 0, count, offset);
+        return index >= 0 ? index : Math.max(0, -index - 2);
+    }
+
+    public List<Integer> headings() {
+        List<Integer> headings = new ArrayList<Integer>();
+        if (!plain) for (int i = 0; i < count; i++) if (type[i] == HEADING) headings.add(i);
+        return headings;
+    }
+
+    public String headingLabel(int block) {
+        StringBuilder label = new StringBuilder();
+        for (int level = 1; level < level(block); level++) label.append("　");
+        return label.append(source(block)).toString();
+    }
+
     public int contentEnd(int block) {
         int stop = contentStop[block] >= 0 ? contentStop[block] : end[block];
         return stop > content[block] && stop <= text.length() && text.charAt(stop - 1) == '\n' ? stop - 1 : stop;

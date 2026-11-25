@@ -12,6 +12,7 @@ public final class SyntaxHighlighter {
     private Lexer lexer = Lexers.of(LanguageId.PLAIN);
     private byte[] states = new byte[16];
     private int count;
+    private BracketPairs brackets;
     private String text = "";
 
     public SyntaxHighlighter() { scratch.clip(0, 0); }
@@ -20,12 +21,14 @@ public final class SyntaxHighlighter {
 
     public void setLanguage(LanguageId id) {
         if (id == null) id = LanguageId.PLAIN;
+        brackets = null;
         language = id;
         lexer = Lexers.of(id);
         if (count > 0) relex(0, count - 1);
     }
 
     public void load(String value) {
+        brackets = null;
         text = value == null ? "" : value;
         lines.load(text);
         count = lines.count();
@@ -35,6 +38,7 @@ public final class SyntaxHighlighter {
 
     /** 同步到新文本；返回首个脏行，无变化返回 -1。 */
     public int update(String value, int changeStart, int oldEnd, int newEnd) {
+        brackets = null;
         text = value == null ? "" : value;
         int[] change = lines.update(text, changeStart, oldEnd, newEnd);
         int first = change[0], keep = change[1], inserted = change[2], removed = change[3];
@@ -79,6 +83,11 @@ public final class SyntaxHighlighter {
         if (offset > 0 && offset < length && Character.isHighSurrogate(text.charAt(offset - 1))
                 && Character.isLowSurrogate(text.charAt(offset))) return offset + (forward ? 1 : -1);
         return offset;
+    }
+
+    public BracketPairs brackets() {
+        if (brackets == null) brackets = new BracketPairs(this);
+        return brackets;
     }
 
     public int lineCount() { return count; }

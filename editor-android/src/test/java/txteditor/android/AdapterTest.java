@@ -162,14 +162,21 @@ public final class AdapterTest {
         // A4：最近打开按时间倒序、同一 URI 去重、超出上限丢最旧的，损坏文件当空列表。
         File recent = File.createTempFile("recent", ".bin");
         try {
+            try (java.io.DataOutputStream oldRecent = new java.io.DataOutputStream(new java.io.FileOutputStream(recent))) {
+                oldRecent.writeInt(1); oldRecent.writeInt(1); oldRecent.writeUTF("content://doc/1"); oldRecent.writeUTF("old"); oldRecent.writeLong(1);
+            }
+            equal(0, RecentFiles.read(recent).get(0).caret);
+            equal(0, RecentFiles.read(recent).get(0).top);
             RecentFiles.add(recent, "content://doc/1", "一.md");
             RecentFiles.add(recent, "content://doc/2", "二.md");
             RecentFiles.add(recent, "content://doc/3", "三.md");
             List<RecentFiles.Entry> entries = RecentFiles.read(recent);
             equal(3, entries.size());
             equal("content://doc/3", entries.get(0).uri); equal("content://doc/1", entries.get(2).uri);
+            RecentFiles.remember(recent, "content://doc/1", 42, 320);
             RecentFiles.add(recent, "content://doc/1", "一.md");
             entries = RecentFiles.read(recent);
+            equal(42, entries.get(0).caret); equal(320, entries.get(0).top);
             equal(3, entries.size()); equal("content://doc/1", entries.get(0).uri);
             for (int i = 0; i < 10; i++) RecentFiles.add(recent, "content://doc/x" + i, "x" + i + ".md");
             entries = RecentFiles.read(recent);

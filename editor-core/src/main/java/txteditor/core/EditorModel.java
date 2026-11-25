@@ -2,6 +2,7 @@ package txteditor.core;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import txteditor.core.text.LineIndex;
 
 /** Single-document model. Use on one UI thread; all offsets are UTF-16. */
 public final class EditorModel {
@@ -9,6 +10,7 @@ public final class EditorModel {
     /** 事务内两次替换间隔不超过该毫秒数才可能合并为一条历史。 */
     public static final long MERGE_WINDOW_MILLIS = 500;
     private static final long MERGE_WINDOW_NANOS = MERGE_WINDOW_MILLIS * 1_000_000L;
+    private final LineIndex lines = new LineIndex();
     private final GapBuffer buffer = new GapBuffer();
     private final Deque<Edit> undo = new ArrayDeque<Edit>();
     private final Deque<Edit> redo = new ArrayDeque<Edit>();
@@ -35,6 +37,7 @@ public final class EditorModel {
     public void load(String text) {
         String normalized = TextCodec.normalize(text);
         buffer.replace(0, buffer.length(), normalized);
+        lines.load(buffer);
         undo.clear();
         redo.clear();
         pending = null;
@@ -47,6 +50,12 @@ public final class EditorModel {
         checkRange(start, end);
         selectionStart = start;
         selectionEnd = end;
+    }
+
+    /** 将持久化偏移吸附到当前正文的有效字符边界。 */
+    public int clampOffset(int offset) {
+        int bounded = Math.max(0, Math.min(length(), offset));
+        return isBoundary(bounded) ? bounded : bounded - 1;
     }
 
     public boolean isBoundary(int index) {
@@ -69,24 +78,28 @@ public final class EditorModel {
     }
 
     public void replace(int start, int end, String text) {
-        checkRange(start, end);
         String inserted = TextCodec.normalize(text);
-        String removed = buffer.subSequence(start, end);
         int caret = start + inserted.length();
+        replace(start, end, inserted, caret, caret);
+    }
+
+    private void replace(int start, int end, String inserted, int afterStart, int afterEnd) {
+        checkRange(start, end);
+        String removed = buffer.subSequence(start, end);
         if (!removed.equals(inserted)) {
-            Edit edit = new Edit(start, removed, inserted, selectionStart, selectionEnd, caret);
-            buffer.replace(start, end, inserted);
+            Edit edit = new Edit(start, removed, inserted, selectionStart, selectionEnd, afterStart, afterEnd);
+            updateBuffer(start, end, inserted);
             redo.clear();
             record(edit);
         }
-        selectionStart = selectionEnd = caret;
+        selectionStart = afterStart; selectionEnd = afterEnd;
     }
 
     public boolean undo() {
         commitPending();
         if (undo.isEmpty()) return false;
         Edit edit = undo.pop();
-        buffer.replace(edit.start, edit.start + edit.inserted.length(), edit.removed);
+        updateBuffer(edit.start, edit.start + edit.inserted.length(), edit.removed);
         selectionStart = edit.beforeStart;
         selectionEnd = edit.beforeEnd;
         redo.push(edit);
@@ -97,8 +110,8 @@ public final class EditorModel {
         commitPending();
         if (redo.isEmpty()) return false;
         Edit edit = redo.pop();
-        buffer.replace(edit.start, edit.start + edit.removed.length(), edit.inserted);
-        selectionStart = selectionEnd = edit.afterCaret;
+        updateBuffer(edit.start, edit.start + edit.removed.length(), edit.inserted);
+        selectionStart = edit.afterStart; selectionEnd = edit.afterEnd;
         undo.push(edit);
         return true;
     }
@@ -124,21 +137,103 @@ public final class EditorModel {
         return Kmp.count(buffer, pattern);
     }
 
+    /** 从左到右替换非重叠匹配，整条命令只产生一项撤销。 */
+    public int replaceAll(String pattern, String replacement) {
+        TextCodec.validateUnicode(pattern);
+        String inserted = TextCodec.normalize(replacement);
+        int count = Kmp.replaceAll(buffer, pattern, inserted, null);
+        if (count == 0 || pattern.equals(inserted)) return count;
+        long outputLength = length() + (long) count * (inserted.length() - pattern.length());
+        if (outputLength > TextCodec.FILE_LIMIT_BYTES) throw new IllegalArgumentException(TextKeys.REPLACE_TOO_LARGE);
+        StringBuilder out = new StringBuilder((int) outputLength);
+        Kmp.replaceAll(buffer, pattern, inserted, out);
+        if (TextCodec.exceedsUtf8Limit(out, TextCodec.FILE_LIMIT_BYTES))
+            throw new IllegalArgumentException(TextKeys.REPLACE_TOO_LARGE);
+        endTransaction();
+        replace(0, length(), out.toString());
+        return count;
+    }
+
+    public enum Command {
+        INDENT(TextKeys.INDENT), OUTDENT(TextKeys.OUTDENT), DUPLICATE(TextKeys.DUPLICATE_LINE),
+        TASK(TextKeys.INSERT_TASK), FENCE(TextKeys.INSERT_FENCE);
+
+        public final String title;
+        Command(String title) { this.title = title; }
+        public boolean markdownOnly() { return this == TASK || this == FENCE; }
+    }
+
+    public void apply(Command command) {
+        endTransaction();
+        int start = selectionStart, end = selectionEnd;
+        int first = lineStartAt(start);
+        if (command == Command.DUPLICATE) {
+            int stop = lineEndAt(start);
+            replace(stop, stop, "\n" + buffer.subSequence(first, stop));
+            return;
+        }
+        if (command == Command.TASK) {
+            int prefix = first;
+            while (prefix < length() && (buffer.charAt(prefix) == ' ' || buffer.charAt(prefix) == '\t')) prefix++;
+            replace(prefix, prefix, "- [ ] ", Math.max(prefix + 6, start + 6), Math.max(prefix + 6, end + 6));
+            return;
+        }
+        if (command == Command.FENCE) {
+            int stop = lineEndAt(end > start && buffer.charAt(end - 1) == '\n' ? end - 1 : end);
+            String content = buffer.subSequence(first, stop);
+            int longest = 2, run = 0;
+            for (int i = 0; i < content.length(); i++) {
+                run = content.charAt(i) == (char) 96 ? run + 1 : 0;
+                longest = Math.max(longest, run);
+            }
+            StringBuilder marker = new StringBuilder();
+            for (int i = 0; i <= longest; i++) marker.append((char) 96);
+            int body = first + marker.length() + 1;
+            replace(first, stop, marker + "\n" + content + "\n" + marker,
+                    body + start - first, body + Math.min(end, stop) - first);
+            return;
+        }
+        int stop = lineEndAt(end > start && buffer.charAt(end - 1) == '\n' ? end - 1 : end);
+        int mappedStart = start, mappedEnd = end;
+        StringBuilder out = new StringBuilder();
+        for (int line = first; ; ) {
+            int next = lineEndAt(line);
+            int removed = 0, added = 0;
+            if (command == Command.INDENT) {
+                out.append("    ");
+                added = 4;
+            } else if (line < next && buffer.charAt(line) == '\t') removed = 1;
+            else while (removed < 4 && line + removed < next && buffer.charAt(line + removed) == ' ') removed++;
+            if (start >= line) mappedStart += added - Math.min(removed, start - line);
+            if (end >= line) mappedEnd += added - Math.min(removed, end - line);
+            out.append(buffer, line + removed, next);
+            if (next == stop) break;
+            out.append('\n');
+            line = next + 1;
+        }
+        replace(first, stop, out.toString(), mappedStart, mappedEnd);
+    }
+
+    private int lineStartAt(int offset) {
+        return lines.start(lines.lineOf(offset));
+    }
+
+    private int lineEndAt(int offset) {
+        return lines.end(lines.lineOf(offset));
+    }
+
     /** 行号从 1 开始，返回行首偏移，无此行返回 -1。 */
     public int lineStart(int line) {
-        if (line < 1) return -1;
-        if (line == 1) return 0;
-        for (int i = 0; i < length(); i++) {
-            if (buffer.charAt(i) == '\n' && --line == 1) return i + 1;
-        }
-        return -1;
+        return line < 1 || line > lines.count() ? -1 : lines.start(line - 1);
     }
 
     public int getCodePointCount() { return Character.codePointCount(buffer, 0, length()); }
-    public int getLineCount() {
-        int lines = 1;
-        for (int i = 0; i < length(); i++) if (buffer.charAt(i) == '\n') lines++;
-        return lines;
+    public int getLineCount() { return lines.count(); }
+    public int lineAt(int offset) { return lines.lineOf(offset) + 1; }
+
+    private void updateBuffer(int start, int oldEnd, String inserted) {
+        buffer.replace(start, oldEnd, inserted);
+        lines.update(buffer, start, oldEnd, start + inserted.length());
     }
 
     private void record(Edit edit) {
@@ -149,7 +244,7 @@ public final class EditorModel {
             pending = new Edit(pending.start, pending.removed,
                     pending.inserted.substring(0, head) + edit.inserted
                             + pending.inserted.substring(head + edit.removed.length()),
-                    pending.beforeStart, pending.beforeEnd, edit.afterCaret);
+                    pending.beforeStart, pending.beforeEnd, edit.afterStart, edit.afterEnd);
             pendingAt = System.nanoTime();
             return;
         }
@@ -185,15 +280,15 @@ public final class EditorModel {
     }
 
     private static final class Edit {
-        final int start, beforeStart, beforeEnd, afterCaret;
+        final int start, beforeStart, beforeEnd, afterStart, afterEnd;
         final String removed, inserted;
-        Edit(int start, String removed, String inserted, int beforeStart, int beforeEnd, int afterCaret) {
+        Edit(int start, String removed, String inserted, int beforeStart, int beforeEnd, int afterStart, int afterEnd) {
             this.start = start;
             this.removed = removed;
             this.inserted = inserted;
             this.beforeStart = beforeStart;
             this.beforeEnd = beforeEnd;
-            this.afterCaret = afterCaret;
+            this.afterStart = afterStart; this.afterEnd = afterEnd;
         }
     }
 }

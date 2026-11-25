@@ -96,6 +96,8 @@ final class EditorBinding extends DocumentFilter {
         }
     }
 
+    boolean isComposing() { return composing; }
+
     void finishInput() {
         if (area.getInputContext() != null) area.getInputContext().endComposition();
         flushComposition();

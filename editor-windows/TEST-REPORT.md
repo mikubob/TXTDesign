@@ -1,5 +1,11 @@
 # Windows 现代界面改造验证记录
 
+## 双端编辑与定位功能的本地回归（2026-11-25）
+
+- `powershell -ExecutionPolicy Bypass -File .\editor-core\build.ps1` 通过。CoreTest 48,520 项、TextTest 3,707 项，新增单次撤销、代理项吸附、长围栏和词法括号配对与折叠范围检查。
+- `powershell -ExecutionPolicy Bypass -File .\editor-windows\build.ps1 -GuiTest` 通过。DesktopTest 283 项，GuiTest 默认 125% 通过 791 项。用 `-Dflatlaf.uiScale=1.5` 复跑 GuiTest 同样通过 791 项。
+- GUI 覆盖全部替换和撤销、重开恢复光标、行号开关、括号标记、折叠展开前后的布局与历史、分屏双向滚动和预览定位。150% 运行仍出现 JDK `WInputMethod.openCandidateWindow` 的候选窗异常，GUI 断言均通过。真人输入法和性能预算未复测。
+
 ## v1.7.0 回归（2026-11-25）
 
 - `powershell -ExecutionPolicy Bypass -File .\editor-core\build.ps1` 通过。CoreTest 48,494 项，TextTest 3,693 项。包含向前查找回绕、重叠计数、末尾空行、预览降级及长行代理项边界。

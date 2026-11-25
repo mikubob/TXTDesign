@@ -30,11 +30,15 @@ final class MarkdownAdapter extends RecyclerView.Adapter<MarkdownAdapter.Holder>
     private final Context context;
     private final LayoutInflater inflater;
     private MdDocument doc;
+    private final java.util.function.IntConsumer locate;
 
-    MarkdownAdapter(Context context) {
+    MarkdownAdapter(Context context, java.util.function.IntConsumer locate) {
         this.context = context;
+        this.locate = locate;
         this.inflater = LayoutInflater.from(context);
     }
+
+    MdDocument document() { return doc; }
 
     void setDocument(MdDocument value) {
         // 整篇换文档：位置全部重排，按"先清空再插入"通知，比 notifyDataSetChanged 精确。
@@ -61,6 +65,12 @@ final class MarkdownAdapter extends RecyclerView.Adapter<MarkdownAdapter.Holder>
 
     @Override public void onBindViewHolder(Holder holder, int position) {
         TextView text = holder.text;
+        View target = text == null ? holder.itemView : text;
+        target.setOnClickListener(doc.isPlain() ? null : v -> {
+            int block = holder.getAdapterPosition();
+            if (block != RecyclerView.NO_POSITION && doc != null && !doc.isPlain()) locate.accept(doc.start(block));
+        });
+        target.setClickable(!doc.isPlain());
         if (text == null) return;
         // 回收复用：字号、字重、缩进每项都显式复位。
         text.setTypeface(Typeface.DEFAULT);

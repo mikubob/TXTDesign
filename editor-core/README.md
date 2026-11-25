@@ -36,6 +36,8 @@ boolean dirty = model.isModified();
 
 实现：`GapBuffer` 自行维护 char 数组及间隙；`Kmp` 自行构造前缀表；`EditorModel` 用两个 `ArrayDeque` 保存可逆编辑。逻辑读取 O(1)，插入/删除 O(d+k)，扩容另加 O(N)，KMP O(N+M)/O(M)，导出、统计、修改状态 O(N)。历史空间 O(H)。UI 文本镜像和统计会增加 O(N)，不能把整次按键称为 O(1)。
 
+编辑命令使用 `EditorModel.replaceAll` 和 `EditorModel.apply`。全部替换以 KMP 扫描非重叠、区分大小写的字面命中，返回替换数，空替换词表示删除。内容变更各占一条撤销记录。定位通过 `LineIndex` 和 `clampOffset` 使用有效的 UTF-16 偏移；Markdown 标题与块锚点来自 `MdDocument`，括号与折叠候选来自共享词法快照。
+
 构建与测试：在本目录运行 `powershell -ExecutionPolicy Bypass -File .\build.ps1`。JDK 9+ 以 `--release 8` 编译；输出 `build/editor-core.jar`。Java 21 下的 `CoreTest` 覆盖随机编辑 12,000 步、KMP 对照 6,000 组、编辑事务与文案键及边界测试。`src/test/java/txteditor/core/Benchmark.java` 可在构建后运行，10 次预热、30 次重复；原始记录见 `benchmark-results.csv`，完整测试说明见 `../editor-windows/TEST-REPORT.md`。文件路径、选择器、安全写入均由平台模块负责。
 
 供安卓界面对照的固定序列（偏移均为 UTF-16）：`load("中文😀\nabc abc")` → `setSelection(0,2)` → `replace(0,2,"新")` 得 `新😀\nabc abc`/光标1 → `undo()` 得原文/选区0..2 → `redo()` 得新文/光标1 → `findNext("abc",0)` 得4 → `setSelection(4,7)` → `replace(4,7,"中😀")` 得 `新😀\n中😀 abc`/光标7 → `undo()` 得 `新😀\nabc abc`/选区4..7。真实两端集成应按此序列再核对，而非把核心 JVM 测试当作安卓设备测试。

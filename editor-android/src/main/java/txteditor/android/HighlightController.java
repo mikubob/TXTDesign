@@ -50,6 +50,8 @@ final class HighlightController {
     /** 上一次派发被跳过（超限/纯文本），下次必须全量对齐。 */
     private boolean forceFull;
     private boolean paintQueued;
+    private volatile txteditor.core.text.BracketPairs bracketIndex;
+    private int bracketVersion = -1;
     private final Runnable lex = () -> dispatch(false);
 
     HighlightController(Runnable limitChanged) { this.limitChanged = limitChanged; }
@@ -82,7 +84,6 @@ final class HighlightController {
 
     /** 由 CoreEditText 在提交一次编辑后调用，三元组来自 TextEdits.commit。 */
     void onTextChanged(int start, int oldEnd, int newEnd) {
-        if (language == LanguageId.PLAIN) return;
         changes++;
         if (changes == 1) {
             changeStart = start;
@@ -91,8 +92,32 @@ final class HighlightController {
         }
         version++;
         applied = -1;
+        onSelection();
         main.removeCallbacks(lex);
         main.postDelayed(lex, DEBOUNCE);
+    }
+
+    int[] fold(int caret) {
+        switch (language) {
+            case JAVA: case C: case CPP: case JSON: break;
+            default: return new int[0];
+        }
+        return bracketVersion == version && bracketIndex != null ? bracketIndex.fold(caret) : NONE;
+    }
+
+    void onSelection() {
+        if (view == null) return;
+        Editable text = view.getText();
+        for (BracketSpan span : text.getSpans(0, text.length(), BracketSpan.class)) text.removeSpan(span);
+        if (bracketVersion != version || bracketIndex == null || BaseInputConnection.getComposingSpanStart(text) >= 0) return;
+        int[] pair = bracketIndex.near(view.getSelectionEnd());
+        for (int position : pair) {
+            if (position < text.length()) text.setSpan(new BracketSpan(), position, position + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+    }
+
+    private static final class BracketSpan extends CharacterStyle {
+        @Override public void updateDrawState(TextPaint paint) { paint.setUnderlineText(true); }
     }
 
     void onScroll() {
@@ -106,13 +131,14 @@ final class HighlightController {
         main.removeCallbacks(lex);
         // 组合态文本尚未进入核心，此时不更新阈值或覆盖输入法样式。
         if (BaseInputConnection.getComposingSpanStart(view.getText()) >= 0) return;
-        boolean overLimit = language != LanguageId.PLAIN
-                && TextCodec.exceedsUtf8Limit(view.getText(), TextCodec.STYLING_LIMIT_BYTES);
+        boolean overLimit = TextCodec.exceedsUtf8Limit(view.getText(), TextCodec.STYLING_LIMIT_BYTES);
         if (overLimit != limited) { limited = overLimit; limitChanged.run(); }
-        if (language == LanguageId.PLAIN || limited) {
+        if (limited) {
             changes = 0;
             forceFull = true;
             clearSpans();
+            bracketIndex = null;
+            onSelection();
             return;
         }
         // shortcut: 80 ms 内多次编辑就整体重扫；要连打也增量，需先合并脏区间再喂 update。
@@ -139,8 +165,14 @@ final class HighlightController {
             engine.load(job.text);
         }
         Painted painted = tokens(job.from, job.to);
+        txteditor.core.text.BracketPairs brackets = engine.brackets();
         main.post(() -> {
-            if (job.version == version) apply(painted);
+            if (job.version == version) {
+                bracketIndex = brackets;
+                bracketVersion = job.version;
+                apply(painted);
+                onSelection();
+            }
         });
     }
 

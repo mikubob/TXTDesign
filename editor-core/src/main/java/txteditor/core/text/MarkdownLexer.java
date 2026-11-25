@@ -5,7 +5,7 @@ package txteditor.core.text;
  * 围栏内部只上"代码"色，不嵌套别的语言；预览里的代码块由解析器按语言另跑词法。
  */
 final class MarkdownLexer implements Lexer {
-    private static final byte TEXT = 0, FENCE_TICK = 1, FENCE_TILDE = 2;
+    private static final byte TEXT = 0;
 
     @Override public byte initialState() { return TEXT; }
 
@@ -13,14 +13,17 @@ final class MarkdownLexer implements Lexer {
         int first = start;
         while (first < end && (text.charAt(first) == ' ' || text.charAt(first) == '\t')) first++;
         if (state != TEXT) {
-            char fence = state == FENCE_TICK ? '`' : '~';
+            char fence = state > 0 ? '`' : '~';
+            int run = repeat(text, first, end, fence);
             out.add(start, end, TokenType.CODE);
-            return closes(text, first, end, fence) ? TEXT : state;
+            return run >= Math.abs(state) && blank(text, first + run, end) ? TEXT : state;
         }
         int fenceEnd = fenceRun(text, first, end);
         if (fenceEnd > 0) {
             out.add(start, end, TokenType.CODE);
-            return text.charAt(first) == '`' ? FENCE_TICK : FENCE_TILDE;
+            // shortcut: 行首状态只有一字节，长度超过 127 的围栏以 127 高亮，预览仍使用完整长度。
+            int width = Math.min(127, fenceEnd - first);
+            return (byte) (text.charAt(first) == '`' ? width : -width);
         }
         int i = first;
         if (i < end && text.charAt(i) == '#') {
@@ -91,10 +94,6 @@ final class MarkdownLexer implements Lexer {
         if (i > from && i + 1 < end && (text.charAt(i) == '.' || text.charAt(i) == ')')
                 && text.charAt(i + 1) == ' ') return i + 2;
         return 0;
-    }
-
-    private static boolean closes(CharSequence text, int from, int end, char fence) {
-        return repeat(text, from, end, fence) >= 3;
     }
 
     /** 行首连续 3 个以上围栏字符时返回其结束位置，否则 0。 */

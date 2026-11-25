@@ -18,7 +18,8 @@ public final class TestDocuments extends ContentProvider {
     @Override public String getType(Uri uri) { return "text/plain"; }
     @Override public Cursor query(Uri uri, String[] p, String s, String[] a, String order) {
         MatrixCursor cursor = new MatrixCursor(new String[]{OpenableColumns.DISPLAY_NAME});
-        cursor.addRow(new Object[]{uri.getLastPathSegment() + ".txt"}); return cursor;
+        String name = uri.getLastPathSegment();
+        cursor.addRow(new Object[]{name.equals("navigation") ? name + ".md" : name + ".txt"}); return cursor;
     }
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         try {
@@ -30,7 +31,11 @@ public final class TestDocuments extends ContentProvider {
             File file = new File(getContext().getCacheDir(), name + ".txt");
             if (!file.exists()) {
                 try (FileOutputStream out = new FileOutputStream(file)) {
-                    out.write(name.equals("invalid") ? new byte[]{(byte) 0xC3, 0x28} : "\uFEFF中文😀\r\n第二行\r".getBytes(StandardCharsets.UTF_8));
+                    if (name.equals("navigation")) {
+                        StringBuilder markdown = new StringBuilder();
+                        for (int i = 0; i < 80; i++) markdown.append("## Section ").append(i).append("\n\nParagraph\n\n");
+                        out.write(markdown.toString().getBytes(StandardCharsets.UTF_8));
+                    } else out.write(name.equals("invalid") ? new byte[]{(byte) 0xC3, 0x28} : "\uFEFF中文😀\r\n第二行\r".getBytes(StandardCharsets.UTF_8));
                 }
             }
             return ParcelFileDescriptor.open(file, ParcelFileDescriptor.parseMode(mode));

@@ -28,6 +28,8 @@ final class MarkdownPreview {
     private static final int BODY = 15, CODE = 14;
     private final JTextPane pane = new JTextPane();
     private boolean dark;
+    private MdDocument document;
+    private int[] renderedStarts = new int[0];
 
     MarkdownPreview() {
         pane.setEditable(false);
@@ -37,10 +39,19 @@ final class MarkdownPreview {
 
     JTextPane pane() { return pane; }
 
+    MdDocument document() { return document; }
+    int renderedStart(int block) { return renderedStarts[block]; }
+    int blockAt(int offset) {
+        if (renderedStarts.length == 0) return -1;
+        int index = java.util.Arrays.binarySearch(renderedStarts, offset);
+        return index >= 0 ? index : Math.max(0, -index - 2);
+    }
+
     void render(String source, boolean dark) {
         this.dark = dark;
         boolean tooLarge = TextCodec.exceedsUtf8Limit(source, TextCodec.STYLING_LIMIT_BYTES);
-        MdDocument document = MdParser.parse(tooLarge ? "" : source);
+        document = MdParser.parse(tooLarge ? "" : source);
+        renderedStarts = new int[document.isPlain() ? 0 : document.count()];
         DefaultStyledDocument target = new DefaultStyledDocument();
         Style base = target.getStyle(StyleContext.DEFAULT_STYLE);
         StyleConstants.setFontFamily(base, FAMILY);
@@ -52,7 +63,10 @@ final class MarkdownPreview {
                 target.insertString(0, TextKeys.PREVIEW_NODE_LIMIT + "\n\n", muted());
                 target.insertString(target.getLength(), source, null);
             } else if (document.count() == 0) target.insertString(0, "（空文档）", muted());
-            else for (int block = 0; block < document.count(); block++) renderBlock(target, document, block);
+            else for (int block = 0; block < document.count(); block++) {
+                renderedStarts[block] = target.getLength();
+                renderBlock(target, document, block);
+            }
         } catch (javax.swing.text.BadLocationException impossible) {
             throw new IllegalStateException(impossible);
         }

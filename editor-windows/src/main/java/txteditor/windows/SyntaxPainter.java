@@ -30,6 +30,7 @@ final class SyntaxPainter {
     private final TokenSink sink = new TokenSink();
     private final SimpleAttributeSet[] styles = new SimpleAttributeSet[TokenType.COUNT];
     private boolean dark;
+    private Object firstBracket, secondBracket;
     private boolean enabled = true;
     private boolean dirty = true;
     private boolean queued;
@@ -104,8 +105,9 @@ final class SyntaxPainter {
 
     private void paint() {
         if (!pane.isDisplayable() || editTimer.isRunning()) return;
-        if (composing()) return; // 组合结束后 flushComposition → refresh 会重新排一次
+        if (composing()) { paintBrackets(new int[0]); return; } // 组合结束后 flushComposition → refresh 会重新排一次
         if (pendingEdit || pendingReload) applyPending();
+        paintBrackets(enabled ? highlighter.brackets().near(pane.getCaretPosition()) : new int[0]);
         if (!enabled) return;
         int count = highlighter.lineCount();
         if (count <= 0) { paintedFrom = paintedTo = -1; return; }
@@ -127,6 +129,31 @@ final class SyntaxPainter {
         paintedFrom = range[0];
         paintedTo = range[1];
         dirty = false;
+    }
+
+    int[] fold(int caret) {
+        switch (highlighter.language()) {
+            case JAVA: case C: case CPP: case JSON: break;
+            default: return new int[0];
+        }
+        if (pendingEdit || pendingReload) applyPending();
+        return enabled ? highlighter.brackets().fold(caret) : new int[0];
+    }
+
+    private void paintBrackets(int[] pair) {
+        javax.swing.text.Highlighter display = pane.getHighlighter();
+        if (firstBracket != null) display.removeHighlight(firstBracket);
+        if (secondBracket != null) display.removeHighlight(secondBracket);
+        firstBracket = secondBracket = null;
+        if (pair.length == 0) return;
+        javax.swing.text.Highlighter.HighlightPainter marker =
+                new javax.swing.text.DefaultHighlighter.DefaultHighlightPainter(pane.getSelectionColor());
+        try {
+            firstBracket = display.addHighlight(pair[0], pair[0] + 1, marker);
+            secondBracket = display.addHighlight(pair[1], pair[1] + 1, marker);
+        } catch (javax.swing.text.BadLocationException stale) {
+            if (firstBracket != null) display.removeHighlight(firstBracket);
+        }
     }
 
     /** JTextPane.getText() 会把 \n 换成平台换行符；同步、高亮与断言都必须用文档原文。 */

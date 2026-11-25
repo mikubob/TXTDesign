@@ -80,14 +80,17 @@
             </LinearLayout>
             <TextView android:id="@+id/match_count" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:visibility="gone" android:accessibilityLiveRegion="polite" android:textColor="?attr/colorOnSurfaceVariant" />
-            <LinearLayout android:id="@+id/replace_panel" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:visibility="gone">
-                <com.google.android.material.textfield.TextInputLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            <LinearLayout android:id="@+id/replace_panel" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                <com.google.android.material.textfield.TextInputLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox" android:hint="@string/replacement" app:endIconMode="clear_text"
                     app:boxCornerRadiusTopStart="14dp" app:boxCornerRadiusTopEnd="14dp" app:boxCornerRadiusBottomStart="14dp" app:boxCornerRadiusBottomEnd="14dp">
                     <com.google.android.material.textfield.TextInputEditText android:id="@+id/replacement" android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:minHeight="56dp" android:singleLine="true" android:inputType="text" android:imeOptions="actionDone|flagNoExtractUi" android:textSize="16sp" />
                 </com.google.android.material.textfield.TextInputLayout>
-                <com.google.android.material.button.MaterialButton android:id="@+id/replace_one" style="@style/SearchAction" android:layout_marginStart="8dp" android:text="@string/replace_one" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="end" android:orientation="horizontal">
+                    <com.google.android.material.button.MaterialButton android:id="@+id/replace_one" style="@style/SearchAction" android:text="@string/replace_one" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/replace_all" style="@style/SearchAction" android:layout_marginStart="8dp" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

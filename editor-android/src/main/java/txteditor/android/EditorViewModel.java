@@ -44,6 +44,7 @@ final class EditorViewModel extends ViewModel {
     String name = LanguageId.PLAIN.defaultFileName(), uri = "", saved = "", pattern = "", replacement = "", message = "";
     String conflictUri = "";
     private String fingerprint = "";
+    int positionTop, recentTop = -1;
     int scroll, afterSave, readyAction, documentVersion, textVersion;
     private final Runnable delayedDraft = this::persist;
 
@@ -91,8 +92,11 @@ final class EditorViewModel extends ViewModel {
                 scroll, pattern, replacement, search, language.name(), viewMode);
     }
 
-    /** 每次正文变化都记一笔，实时预览靠它判断要不要重排。 */
-    void edited() { textVersion++; main.removeCallbacks(delayedDraft); main.postDelayed(delayedDraft, 700); }
+    /** 选区和面板状态也要存草稿，只有正文变化才使预览映射过期。 */
+    void edited(boolean textChanged) {
+        if (textChanged) textVersion++;
+        main.removeCallbacks(delayedDraft); main.postDelayed(delayedDraft, 700);
+    }
 
     void persist() { persist(false); }
 
@@ -108,10 +112,18 @@ final class EditorViewModel extends ViewModel {
         });
     }
 
+    void rememberPosition() {
+        if (uri.isEmpty()) return;
+        String target = uri;
+        int caret = core.getSelectionEnd(), top = positionTop;
+        io.execute(() -> RecentFiles.remember(recentFile, target, caret, top));
+    }
+
     /** 类型决定默认后缀与高亮语言，草稿随新建一起写入。 */
     void newDocument(LanguageId type) {
+        rememberPosition();
         language = type;
-        core.load(""); saved = ""; uri = ""; fingerprint = ""; name = type.defaultFileName(); scroll = 0; viewMode = SOURCE;
+        core.load(""); saved = ""; uri = ""; fingerprint = ""; name = type.defaultFileName(); scroll = positionTop = 0; recentTop = -1; viewMode = SOURCE;
         documentVersion++; textVersion++; persist(); notifyChange();
     }
 
@@ -119,6 +131,7 @@ final class EditorViewModel extends ViewModel {
     void newDocument() { newDocument(language); }
 
     void open(Uri target) {
+        rememberPosition();
         busy = true; notifyChange();
         io.execute(() -> {
             try {
@@ -140,9 +153,12 @@ final class EditorViewModel extends ViewModel {
                 String filename = displayName(target);
                 // 后缀优先，MIME 与首行兜底：SAF 对 .java/.c 常报 application/octet-stream。
                 LanguageId detected = LanguageId.detect(filename, mime(target), text);
-                RecentFiles.add(recentFile, target.toString(), filename);
+                RecentFiles.Entry recent = RecentFiles.add(recentFile, target.toString(), filename);
                 main.post(() -> {
-                    core.load(text); saved = text; uri = target.toString(); fingerprint = baseline; name = filename; scroll = 0;
+                    core.load(text); saved = text; uri = target.toString(); fingerprint = baseline; name = filename;
+                    int caret = core.clampOffset(recent.caret);
+                    core.setSelection(caret, caret);
+                    scroll = 0; positionTop = recentTop = core.clampOffset(recent.top);
                     language = detected; viewMode = SOURCE;
                     documentVersion++; textVersion++; busy = false; message = app.getString(R.string.opened_utf8); persist(); notifyChange();
                 });
@@ -171,6 +187,7 @@ final class EditorViewModel extends ViewModel {
 
     void save(Uri target, boolean overwrite) {
         SessionSnapshot draft = snapshot();
+        int top = positionTop;
         String previous = uri, baseline = fingerprint;
         busy = true; notifyChange();
         io.execute(() -> {
@@ -194,6 +211,7 @@ final class EditorViewModel extends ViewModel {
                 String filename = target.toString().equals(previous) ? draft.fileName : displayName(target);
                 String written = encodeFingerprint(sha256().digest(bytes));
                 RecentFiles.add(recentFile, target.toString(), filename);
+                RecentFiles.remember(recentFile, target.toString(), draft.selectionEnd, top);
                 main.post(() -> {
                     core.markSaved(draft.text); saved = draft.text; uri = target.toString(); name = filename;
                     fingerprint = written;

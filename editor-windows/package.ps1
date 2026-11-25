@@ -1,4 +1,4 @@
-﻿param([string]$Version = '1.7.0', [string]$Nsis)
+﻿param([string]$Version = '1.8.0', [string]$Nsis)
 $ErrorActionPreference = 'Stop'
 # jpackage / NSIS 与内层 build.ps1 都会往 stderr 写进度与警告，Windows PowerShell 5.1 在 Stop 下
 # 会把它们升级成 NativeCommandError；外部程序统一只看退出码。

@@ -13,7 +13,7 @@ java -jar .\build\txteditor-windows.jar
 
 也可双击 `run.cmd`。最终 JAR 已包含共享核心、FlatLaf 类、资源、原生库和 Apache-2.0 许可；复制单个 JAR 到有 Java 的电脑即可启动，无需配置第三方 classpath。原生库正常由 FlatLaf 解压到临时目录；有执行限制的机器可能无法使用原生窗口装饰，见官方[原生库分发说明](https://www.formdev.com/flatlaf/native-libraries/)。
 
-[GitHub Releases](https://github.com/mikubob/TXTDesign/releases/latest) 提供 Windows 10/11 x64 的 NSIS 简体中文安装向导，自带 Temurin Java 21。安装范围是当前用户，可以选择目录，创建开始菜单和桌面快捷方式。构建使用 Temurin JDK 21 x64 和 NSIS 3.13，运行 `powershell -ExecutionPolicy Bypass -File .\package.ps1 -Version 1.7.0`，产物位于 `build/installer/TXTDesign-1.7.0-Setup-win-x64.exe`。NSIS 安装在默认位置时可直接运行脚本，自定义位置可传 `-Nsis` 指定编译器。安装器未使用商业代码签名证书，运行时包含 `java.desktop` 和 `java.logging`。
+[GitHub Releases](https://github.com/mikubob/TXTDesign/releases/latest) 提供 Windows 10/11 x64 的 NSIS 简体中文安装向导，自带 Temurin Java 21。安装范围是当前用户，可以选择目录，创建开始菜单和桌面快捷方式。构建使用 Temurin JDK 21 x64 和 NSIS 3.13，运行 `powershell -ExecutionPolicy Bypass -File .\package.ps1 -Version 1.8.0`，产物位于 `build/installer/TXTDesign-1.8.0-Setup-win-x64.exe`。NSIS 安装在默认位置时可直接运行脚本，自定义位置可传 `-Nsis` 指定编译器。安装器未使用商业代码签名证书，运行时包含 `java.desktop` 和 `java.logging`。
 
 从 v1.6.0 或更早的旧安装器迁移时，关闭应用后通过 Windows「已安装的应用」卸载旧版，再安装新版。草稿、主题和最近文件继续读取当前用户的会话目录。
 
@@ -21,13 +21,15 @@ java -jar .\build\txteditor-windows.jar
 
 - 顶部保留文件、编辑、查找菜单与快捷键，新增视图菜单。文件 → 新建 先选类型（纯文本 / Markdown / Java / C / C++ / JSON / XML），Ctrl+N 直接建纯文本。常用工具栏提供新建、打开、蓝色保存、撤销、重做及查找 / 替换；图标有提示与无障碍名称，空历史的撤销 / 重做会禁用。
 - 统一浅色 / 深色主题、蓝色强调、中文字体层级、细边框、留白、圆角按钮和细滚动条。视图菜单提供跟随系统 / 浅色 / 深色三态，跟随系统读取注册表 `AppsUseLightTheme` 并每秒比对一次；右上角按钮循环切换。主题、窗口几何、缩放和最近文件存在 `%LOCALAPPDATA%\TXTDesign\session\prefs.properties`，启动首帧前先装主题，避免闪白。还原点落在已拔掉的显示器时回落主屏居中。
-- 工具栏下方常驻一排最近文件标签（最多 8 个，缺失文件置灰），点一下即可切换；同样的列表也在 文件 → 最近文件 里。
-- Markdown 预览改为右侧分屏：Ctrl+E 或「预览」按钮挂上 / 卸下右侧预览，编辑停下约 0.2 秒自动重排，滚动位置保留；分隔条可拖动，窗口变大时多出的宽度留给源码。
+- 工具栏下方常驻一排最近文件标签（最多 8 个，缺失文件置灰），点一下即可切换。同样的列表也在「文件 → 最近文件」，重开会恢复光标和源码滚动位置，旧记录从文档开头打开。
+- Markdown 预览改为右侧分屏：Ctrl+E 或「预览」按钮挂上 / 卸下右侧预览，编辑停下约 0.2 秒自动重排，两侧按块联动滚动。用「视图 → Markdown 大纲」跳到标题，双击预览内容或用预览右键菜单的「定位到源码」跳到对应块。分隔条可拖动。
 - 文档卡片显示文件名、完整路径提示和修改状态。路径过长时省略显示，悬停查看完整位置。底部显示码点数、行数、UTF-8 / LF、光标行列及缩放（列按 UTF-16 单元计数）。
 - 查找栏默认收起。Ctrl+F 展开查找，Ctrl+H 或工具栏展开查找替换；宽度 ≥ 960 逻辑像素时停靠右侧（上限 320），不足时回到顶部条；关闭按钮 / Escape 收回并将焦点返回正文，展开状态写入可访问描述。收起保留查找词和替换词。Enter 执行相应查找 / 替换，查找后面板显示匹配总数。
 - 正文缩放 70%–200%：底部 − / +、Ctrl+减号 / 等号、Ctrl+滚轮；Ctrl+0 或点击百分比重置。缩放不修改文件或历史。最小窗口 720×520，矮窗口自动收起抬头、文件信息行并收紧留白，把高度留给正文。
 
-其他快捷键：Ctrl+N/O/S、Ctrl+Shift+S、Ctrl+Z/Y、Ctrl+X/C/V/A、F3（下一处）、Shift+F3（上一处）、Ctrl+G（跳转到行）、Alt+F4。查找区分大小写、按字面匹配。下一处从选区末尾开始，上一处查找选区开头之前的完整命中，两个方向各最多回绕一次。空词时查找方向及替换按钮禁用。“替换当前”在当前选区等于查找词时替换，否则先查找再替换；一次替换是一条可撤销命令。
+其他快捷键：Ctrl+N/O/S、Ctrl+Shift+S、Ctrl+Z/Y、Ctrl+X/C/V/A、F3（下一处）、Shift+F3（上一处）、Ctrl+G（跳转到行）、Alt+F4。查找区分大小写、按字面匹配。下一处从选区末尾开始，上一处查找选区开头之前的完整命中，两个方向各最多回绕一次。空词时查找方向及替换按钮禁用。“替换当前”在当前选区等于查找词时替换，否则先查找再替换；「全部替换」从头替换非重叠命中，显示替换数，留空可删除，可一次撤销。超出 16 MiB 时保留原文。
+
+「编辑」菜单可缩进、反缩进、复制当前行，Markdown 中也可插入待办和代码围栏。「视图」菜单可开关行号，并折叠或展开 Java、C、C++、JSON 的多行括号块。每次折叠一个块，保留首尾行，编辑正文自动展开。光标邻近有效括号时标出配对。
 
 ## 从源码构建与验证
 

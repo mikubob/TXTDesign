@@ -1,5 +1,11 @@
 # 安卓 Material 3 改造验证记录
 
+## 双端编辑与定位功能的本地回归（2026-11-25）
+
+- `powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Test` 通过。AdapterTest 7,636 项，包含最近打开记录版本 1 兼容及版本 2 位置往返。Lint 0 错误、10 警告，APK v2 签名验证通过。
+- `powershell -ExecutionPolicy Bypass -File .\editor-android\device-test.ps1 -Serial 127.0.0.1:16800 -TestInstance` 在本次新建的 MuMu Android 15 实例 TXTDesign QA 通过。主流程 102 项、强杀恢复 5 项。新增覆盖全部替换与撤销、标题大纲、分屏双向滚动、预览定位、最近文档恢复光标与视口，以及折叠布局与正文历史。
+- 设备检查由 Instrumentation 驱动。实体手机、真人输入法和性能预算未复测。
+
 ## v1.7.0 回归（2026-11-25）
 
 - `powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Test` 通过。AdapterTest 7,632 项，包含新旧草稿和超过 32 MiB 草稿的往返。Lint 0 错误、10 警告，APK v2 签名验证通过。

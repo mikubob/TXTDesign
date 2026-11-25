@@ -52,24 +52,18 @@ public final class LineIndex {
         int removed = 0;
         while (keep + removed < count && starts[keep + removed] <= oldEnd) removed++;
         int delta = newEnd - oldEnd;
-        for (int i = keep + removed; i < count; i++) starts[i] += delta;
-        if (removed > 0) {
-            System.arraycopy(starts, keep + removed, starts, keep, count - keep - removed);
-            count -= removed;
-        }
-        int inserted = 0;
-        int limit = Math.max(changeStart, newEnd);
-        for (int i = changeStart; i < limit && i < text.length(); i++) {
-            if (text.charAt(i) == '\n') insert(keep + inserted++, i + 1);
-        }
+        int inserted = 0, limit = Math.min(text.length(), newEnd);
+        for (int i = changeStart; i < limit; i++) if (text.charAt(i) == '\n') inserted++;
+        int tail = keep + removed;
+        int nextTail = keep + inserted;
+        int nextCount = count + inserted - removed;
+        if (nextCount > starts.length) starts = java.util.Arrays.copyOf(starts, Math.max(starts.length * 2, nextCount));
+        if (tail != nextTail) System.arraycopy(starts, tail, starts, nextTail, count - tail);
+        for (int i = nextTail; i < nextCount; i++) starts[i] += delta;
+        int at = keep;
+        for (int i = changeStart; i < limit; i++) if (text.charAt(i) == '\n') starts[at++] = i + 1;
+        count = nextCount;
         length = text.length();
         return new int[] {first, keep, inserted, removed};
-    }
-
-    private void insert(int at, int value) {
-        if (count == starts.length) starts = java.util.Arrays.copyOf(starts, count * 2);
-        System.arraycopy(starts, at, starts, at + 1, count - at);
-        starts[at] = value;
-        count++;
     }
 }

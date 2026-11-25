@@ -11,14 +11,14 @@
 | 文件 | 用途 |
 | --- | --- |
 | `TXTDesign-android.apk` | Android 8.0 及以上，下载后允许当前来源安装应用 |
-| `TXTDesign-1.7.0-Setup-win-x64.exe` | Windows 10/11 x64 简体中文安装向导，自带 Temurin Java 21，按当前用户安装 |
+| `TXTDesign-1.8.0-Setup-win-x64.exe` | Windows 10/11 x64 简体中文安装向导，自带 Temurin Java 21，按当前用户安装 |
 | `txteditor-windows.jar` | 已安装桌面 Java 8+ 的用户可运行 `java -jar txteditor-windows.jar` |
 | `SHA256SUMS.txt` | 发布附件的 SHA-256 校验值 |
 | `Source code (zip / tar.gz)` | 对应版本的源码和 README，由 GitHub 自动提供 |
 
 从旧版 Windows 安装器迁移时，先关闭应用，再在系统「已安装的应用」中卸载旧版并安装新版。两种安装方式使用同一份用户会话数据。
 
-安卓包使用演示用调试签名，Windows 安装器未做商业代码签名。首次安装时系统可能要求确认来源。Android 的 `versionName` 为 1.7.0，仓库发布版本为 v1.7.0。
+安卓包使用演示用调试签名，Windows 安装器未做商业代码签名。首次安装时系统可能要求确认来源。Android 的 `versionName` 为 1.8.0，仓库发布版本为 v1.8.0。
 
 本地安卓签名证书不会上传 GitHub；自动构建会生成临时调试证书，跨次构建可能无法直接覆盖安装。遇到签名冲突时先将文档保存到应用外；卸载会删除应用私有草稿。
 
@@ -30,7 +30,9 @@
 - 严格 UTF-8，读取文件首 BOM，统一换行为 LF。
 - 按后缀识别 Markdown / Java / C / C++ / JSON / XML，两端同一套词法做源码高亮。
 - Markdown 实时预览（标题、列表、引用、表格、代码块）：编辑停下约 0.2 秒即重排，Windows 在右侧分屏、安卓在同屏分屏，边改边看。
-- 最近文件：Windows 标题下常驻一排文件标签，安卓在「更多文件操作」里按打开时间倒序列出，点一下即可续开。
+- 最近文件记住每份文档的光标和源码滚动位置。Windows 从文件标签或菜单续开，安卓从「更多文件操作」续开。
+- 全部替换按字面匹配并显示替换数，可一次撤销。编辑命令支持缩进、反缩进、复制当前行和插入 Markdown 待办或代码围栏。
+- Markdown 大纲可跳转标题，预览和源码按块联动。编辑区行号可开关，支持括号匹配及 Java、C、C++、JSON 多行代码块折叠。
 - 安卓使用系统文件选择器，并保存私有草稿；Windows 支持快捷键及正文缩放。
 
 安卓界面实拍：
@@ -74,8 +76,8 @@ powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Test
 Windows 安装器需要可再分发的 **Temurin JDK 21 x64** 和 **NSIS 3.13**。将 JDK `bin` 加入 `PATH` 后运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1.7.0
-# 输出：editor-windows/build/installer/TXTDesign-1.7.0-Setup-win-x64.exe
+powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1.8.0
+# 输出：editor-windows/build/installer/TXTDesign-1.8.0-Setup-win-x64.exe
 ```
 
 使用 JDK 自带的 [jpackage](https://docs.oracle.com/en/java/javase/21/jpackage/packaging-tool-user-guide.pdf) 生成应用镜像，再用 [NSIS](https://sourceforge.net/projects/nsis/files/NSIS%203/3.13/) 生成安装向导。捆绑运行时的许可说明保留在安装目录 `runtime/legal/`。
@@ -87,8 +89,8 @@ powershell -ExecutionPolicy Bypass -File .\editor-windows\package.ps1 -Version 1
 发布新版本时，先更新安卓 `build.gradle` 中的 `versionCode` / `versionName`，再推送三段式版本标签：
 
 ```powershell
-git tag v1.7.0
-git push origin v1.7.0
+git tag v1.8.0
+git push origin v1.8.0
 ```
 
 标签构建成功后，工作流自动创建 GitHub Release，附上 APK、EXE、JAR 和校验清单；GitHub 同时提供对应标签的源码归档。自动发布使用仓库内置 `GITHUB_TOKEN`，无需在源码中放访问令牌。

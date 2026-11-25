@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import txteditor.core.EditorModel;
 import txteditor.core.SessionSnapshot;
 import txteditor.core.TextCodec;
+import txteditor.core.TextKeys;
 import txteditor.core.text.LanguageId;
 
 public final class DeviceTests extends Instrumentation {
@@ -64,6 +65,17 @@ public final class DeviceTests extends Instrumentation {
                         if (clickable != null && clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                             waitForIdleSync(); return;
                         }
+                        android.graphics.Rect bounds = new android.graphics.Rect();
+                        node.getBoundsInScreen(bounds);
+                        if (node.isVisibleToUser() && !bounds.isEmpty()) {
+                            long time = android.os.SystemClock.uptimeMillis();
+                            for (int action : new int[] {android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP}) {
+                                android.view.MotionEvent touch = android.view.MotionEvent.obtain(time, time, action,
+                                        bounds.exactCenterX(), bounds.exactCenterY(), 0);
+                                try { getUiAutomation().injectInputEvent(touch, true); } finally { touch.recycle(); }
+                            }
+                            waitForIdleSync(); return;
+                        }
                     }
                 }
             }
@@ -93,7 +105,110 @@ public final class DeviceTests extends Instrumentation {
         }
     }
 
+    private void sourceViews() throws Exception {
+        String source = "class Example {\n    // }\n    int n = 1;\n}\n";
+        ui(() -> {
+            activity.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
+            editor.setShowSoftInputOnFocus(false);
+            state.newDocument(LanguageId.JAVA);
+            editor.setLineNumbers(true);
+            editor.getText().replace(0, editor.length(), source);
+            editor.sync(false);
+            state.core.load(source);
+            editor.setSelection(source.indexOf("int"));
+        });
+        int[] before = {0};
+        ui(() -> before[0] = editor.getLayout().getLineTop(editor.getLayout().getLineForOffset(source.lastIndexOf('}'))));
+        boolean[] folded = {false};
+        for (int i = 0; i < 40 && !folded[0]; i++) {
+            ui(() -> folded[0] = editor.toggleFold());
+            if (!folded[0]) Thread.sleep(50);
+        }
+        equal(true, folded[0]);
+        ui(() -> {
+            android.text.Layout layout = editor.getLayout();
+            equal(true, layout.getLineTop(layout.getLineForOffset(source.lastIndexOf('}'))) < before[0]);
+            equal(source, state.core.getText());
+            equal(false, state.core.canUndo());
+            equal(true, editor.toggleFold());
+        });
+        ui(() -> {
+            android.text.Layout layout = editor.getLayout();
+            equal(before[0], layout.getLineTop(layout.getLineForOffset(source.lastIndexOf('}'))));
+            editor.setLineNumbers(false);
+            state.newDocument(LanguageId.PLAIN);
+        });
+    }
+
+    private void markdownNavigation() throws Exception {
+        Uri uri = Uri.parse("content://txteditor.android.tests.docs/navigation");
+        ui(() -> state.open(uri)); ready();
+        ui(() -> {
+            equal(LanguageId.MARKDOWN, state.language);
+            activity.findViewById(R.id.mode_preview).performClick();
+        });
+        androidx.recyclerview.widget.RecyclerView preview = activity.findViewById(R.id.preview);
+        MarkdownAdapter adapter = (MarkdownAdapter) preview.getAdapter();
+        androidx.recyclerview.widget.LinearLayoutManager layout = (androidx.recyclerview.widget.LinearLayoutManager) preview.getLayoutManager();
+        for (int i = 0; i < 40; i++) {
+            int[] items = {0};
+            ui(() -> items[0] = layout.findFirstVisibleItemPosition() >= 0 ? adapter.getItemCount() : 0);
+            if (items[0] > 0) break;
+            Thread.sleep(50);
+        }
+        ui(() -> {
+            equal(160, adapter.getItemCount());
+            editor.restoreScroll(editor.getHeight());
+            if (editor.getScrollY() <= 0) throw new AssertionError("source layout too short: " + editor.getLayout().getHeight()
+                    + ", lines=" + editor.getLayout().getLineCount() + ", length=" + editor.length());
+        });
+        for (int i = 0; i < 20; i++) {
+            int[] top = {-1};
+            ui(() -> top[0] = layout.findFirstVisibleItemPosition());
+            if (top[0] > 0) break;
+            Thread.sleep(50);
+        }
+        ui(() -> {
+            if (layout.findFirstVisibleItemPosition() <= 0)
+                throw new AssertionError("preview top=" + layout.findFirstVisibleItemPosition()
+                        + ", source scroll=" + editor.getScrollY() + ", source height=" + editor.getHeight());
+            int before = editor.getScrollY();
+            preview.scrollBy(0, preview.getHeight());
+            equal(true, editor.getScrollY() > before);
+        });
+        ui(() -> activity.findViewById(R.id.files).performClick());
+        clickText("Markdown 大纲");
+        clickText("　Section 2");
+        ui(() -> {
+            equal(adapter.document().start(4), editor.getSelectionStart());
+            androidx.recyclerview.widget.RecyclerView.ViewHolder holder = preview.findViewHolderForAdapterPosition(4);
+            equal(true, holder != null && holder.itemView.isClickable());
+            editor.setSelection(0);
+            equal(true, holder.itemView.performClick());
+            equal(adapter.document().start(4), editor.getSelectionStart());
+        });
+        int[] position = {0, 0};
+        ui(() -> {
+            int target = adapter.document().start(6);
+            editor.setSelection(target);
+            editor.restoreScroll(editor.getHeight() * 2);
+            editor.sync(false);
+            position[0] = editor.getSelectionStart();
+            position[1] = editor.getScrollY();
+            state.newDocument(LanguageId.PLAIN);
+            state.open(uri);
+        });
+        ready();
+        ui(() -> {
+            equal(position[0], editor.getSelectionStart());
+            equal(true, position[1] > 0 && Math.abs(editor.getScrollY() - position[1]) <= editor.getLineHeight());
+            state.newDocument(LanguageId.PLAIN);
+        });
+    }
+
     private void exercise() throws Exception {
+        sourceViews();
+        markdownNavigation();
         ui(() -> {
             equal(true, activity.findViewById(R.id.toolbar) instanceof com.google.android.material.appbar.MaterialToolbar);
             equal(true, activity.findViewById(R.id.save) instanceof com.google.android.material.button.MaterialButton);
@@ -139,6 +254,14 @@ public final class DeviceTests extends Instrumentation {
             equal(5, state.core.getSelectionStart()); equal(8, state.core.getSelectionEnd());
             activity.findViewById(R.id.replace_one).performClick(); equal("中文😀\n测试 abc", state.core.getText());
             activity.findViewById(R.id.undo).performClick(); equal("中文😀\nabc abc", editor.getText().toString());
+        });
+        ui(() -> {
+            ((EditText) activity.findViewById(R.id.replacement)).setText("");
+            activity.findViewById(R.id.replace_all).performClick();
+            equal(TextKeys.of(TextKeys.REPLACED_COUNT, 2), ((android.widget.TextView) activity.findViewById(R.id.match_count)).getText().toString());
+            equal("中文" + new String(Character.toChars(0x1f600)) + "\n ", state.core.getText());
+            activity.findViewById(R.id.undo).performClick();
+            equal("中文" + new String(Character.toChars(0x1f600)) + "\nabc abc", state.core.getText());
         });
         EditorModel previous = state.core;
         ActivityMonitor monitor = addMonitor(MainActivity.class.getName(), null, false);

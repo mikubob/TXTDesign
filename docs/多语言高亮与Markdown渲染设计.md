@@ -287,7 +287,7 @@ Markdown 的增量比词法难：一个 `>` 可能改变后面几十行的归属
 
 | | 安卓 | Windows |
 | --- | --- | --- |
-| 载体 | `RecyclerView` + 每块一个 ViewHolder | `JTextPane` + `StyledDocument`（连续段落），代码块以 `ComponentView` 嵌入 |
+| 载体 | `RecyclerView` + 每块一个 ViewHolder | `JTextPane` + `StyledDocument`（连续段落），代码块使用等宽文本和词法配色 |
 | 为什么 | 长文只测量可视块，滚动成本与文档长度无关；块级点击、代码块横向滚动都自然 | 复用 Swing 现成的排版、选择、复制、无障碍；`JTextArea` 换 `JTextPane` 是本次唯一大改 |
 | 代码块 | `TextView` + 第 6 节 token span，横向 `HorizontalScrollView` | 只读 `JTextPane`，同一套 token 上色 |
 | 表格 | 自绘等宽列（`TableLayout` + 横向滚动） | 首版等宽文本 + 表头背景；P1 换成自绘 `View` |
@@ -378,7 +378,7 @@ final class SyntaxPainter {
 
 - 工具栏加"预览"切换（`Ctrl+E`），`CardLayout` 在编辑区与预览区之间切换；P1 提供 `JSplitPane` 左右分栏。
 - 预览主体 `JTextPane`（只读、透明背景）+ `StyledDocument`：段落、标题、列表、引用都在同一文档里连续排版，滚动与选择天然可用。
-- 代码块用 `ComponentView` 嵌入只读 `JTextPane`（自带高亮与横向滚动）；一个文档超过 200 个代码块时降级为等宽文本块（防止组件爆炸）。
+- 代码块以等宽文本插入同一个 `StyledDocument`，复用源码词法器上色，由预览区统一滚动。
 - 表格首版渲染成等宽文本 + 表头底色，P1 再换自绘 `View`。
 - 主题切换：预览侧的样式表由 `TokenPalette` 生成，与 `EditorTheme.install` 同一份色值，不新建主题系统。
 
@@ -434,7 +434,6 @@ final class SyntaxPainter {
 | 文本 > 2 MiB（UTF-8 字节） | 关闭自动高亮与预览，并提示原因 |
 | 单行 > 100,000 UTF-16 单元 | 源码只给可视区间贴色，仍扫描长行以维持词法状态 |
 | Markdown 块节点 > 200,000 | 停止构造富文本节点，预览显示全部纯文本 |
-| 围栏代码块 > 300 个（桌面预览） | 代码块降级为等宽文本 |
 | 高亮连续 3 次超时（> 500 ms） | 自动降级为纯文本，并在状态栏说明 |
 
 ## 12. 兼容、持久化与安全
@@ -478,7 +477,7 @@ final class SyntaxPainter {
 | --- | --- | --- |
 | M1（3 学时） | `LanguageId`、`LanguageRegistry`、`LineIndex`、`TokenSink`、Java/C 词法器 + 全量高亮；两端先做"只上色不增量" | 核心测试通过；`.java`/`.c` 可高亮 |
 | M2（4 学时） | `HighlightState` 增量重扫、脏行重绘、两端窗口化贴色、性能基准 | 增量==全量测试；按键延迟达标 |
-| M3（4 学时） | `MdParser`（块 + 行内）、`MdTree`、代码块复用词法器；两端预览（安卓 RecyclerView、桌面 JTextPane + ComponentView） | `.md` 双模式可用 |
+| M3（4 学时） | `MdParser`（块 + 行内）、`MdTree`、代码块复用词法器；两端预览（安卓 RecyclerView、桌面 JTextPane + StyledDocument） | `.md` 双模式可用 |
 | M4（2 学时） | 类型识别接入文件通路、状态持久化升级、主题色板、大纲与滚动同步、降级策略 | 端到端可用 |
 | M5（2 学时） | 测试补全、设备/GUI 回归、README 与 TEST-REPORT 更新、答辩材料 | 报告与截图 |
 
@@ -551,11 +550,12 @@ final class SyntaxPainter {
 | 独立 `LanguageRegistry` | 合并进 `LanguageId` 的静态方法 | 检测入口只该有一个，少一个类 |
 | `LineIndex` 用间隙数组 | `int[]` + 尾部 `arraycopy` 平移 | 20 万行内平移几十微秒，间隙收益要等分块文件 |
 | 每行常驻 `TokenSink` | 只存每行行首状态（1 B/行），绘制时 `paint(from,to)` 现算 | 1 MB 源码可省数 MB，且编辑后不用平移 token |
+| Windows 预览为每个代码块嵌入 `ComponentView` | 代码直接写入预览的样式文档 | 预览统一布局与滚动，代码块无需独立组件 |
 | Markdown 显式容器栈 | 单遍扫描 + 按标记/缩进判定，行内按最外层配对 | 首版子集够用；深层嵌套留 P1 |
 | Windows 用 `doc.render(...)` 批量上色 | 缩小重绘窗口，每行先归零再贴 token | `render` 持读锁、`setCharacterAttributes` 要写锁，读锁不可升级，同线程会永久等待 |
 | 代码块 `end` 含闭合围栏 | 单独记录 `contentStop`，正文不含围栏行 | 否则 `source(i)` 会把 ` ``` ` 带进代码内容 |
 
-未做（P1）：括号匹配与折叠、大纲面板、源码↔预览块级滚动锚点、表格列宽/合并、预览随缩放、代码块复制按钮、Markdown 增量重解析（当前整篇重建）。
+2026-10-28 尚未实现的项目中，括号匹配、代码折叠、标题大纲和源码／预览块级联动已在后续本地改动中实现（见附录 F）。表格列宽／合并、预览随缩放、代码块复制和 Markdown 增量重解析仍沿用本节记录的实现范围。
 
 验证记录：
 
@@ -574,3 +574,18 @@ final class SyntaxPainter {
 ## 附录 E：v1.7.0 降级与一致性
 
 源码高亮和 Markdown 预览的 2 MiB 门槛共用 UTF-8 字节计数。超过 Markdown 块上限时，Windows 直接显示纯文本，Android 每 32 行作为一项渐进显示。引用或列表缩进深度超过 32 时保留整行的字面文本。列表前缀由 AST 提供，包含原编号及任务勾选状态。行内链接扫描复用向前查找的括号位置，未闭合标记只按普通文本呈现。
+
+## 附录 F：编辑命令与定位
+
+- 全部替换两遍 KMP 分别计数与构造非重叠的结果。一次提交给历史，结果超过 16 MiB 时保留原文。选区缩进以四个空格为一级，反缩进删除一个制表符或最多四个前导空格。选区正好结束在下一行行首时，该行保持原样。
+- 最近文件在平台原有记录中附加光标和源码视口顶部两个 UTF-16 偏移。旧记录两项默认为零，重开时按当前内容裁剪和吸附。安卓的 `recent.bin` 写版本 2，可读版本 1。草稿格式沿用既有版本。
+- 标题大纲从 AST 提取块索引和标题层级。Windows 保存每个块在样式文档里的渲染偏移，安卓以 RecyclerView 的项位置作为渲染锚点。分屏对齐首个可见块，预览重建期间暂停使用旧映射。纯文本降级时暂停大纲和联动。
+- 行号按逻辑行绘制，视觉折行不增加行号。括号匹配按词法结果跳过字符串、字符字面量、注释和 Markdown 代码 token。折叠用于 Java、C、C++、JSON 的多行花括号和方括号，保留首尾行。每个编辑视图同时保存一个折叠范围，进入隐藏行或改动文本即展开。超过 2 MiB 时停用括号匹配和折叠，行号仍可用。
+- 围栏的结束标记必须同字符、长度至少等于开头且后面只有空白。预览解析完整长度，源码词法状态的一字节宽度最多记录 127。
+
+参考实现与取舍
+
+- 全部替换采用按文档批量执行、报告替换数量的交互。行编辑分别提供选区缩进与整行复制。 [Notepad++ 查找替换实现](https://raw.githubusercontent.com/notepad-plus-plus/notepad-plus-plus/master/PowerEditor/src/ScintillaComponent/FindReplaceDlg.cpp) · [Markor 编辑动作记录](https://github.com/gsantner/markor/blob/master/NEWS.md)
+- 按文件保存位置，并在最近文件入口恢复。 [PilcrowMD 用户文档](https://github.com/pilcrowmd/pilcrow)
+- 大纲由标题层级生成，预览和源码用对应内容做双向定位。 [Vditor 大纲接口](https://github.com/Vanessa219/vditor/blob/master/README_en_US.md) · [MarkEdit-preview 滚动同步说明](https://github.com/MarkEdit-app/MarkEdit-preview)
+- 行号只绘制可见行，括号与折叠基于词法 token。 [RSyntaxTextArea 行号](https://raw.githubusercontent.com/bobbylight/RSyntaxTextArea/master/RSyntaxTextArea/src/main/java/org/fife/ui/rtextarea/LineNumberList.java) · [括号匹配](https://github.com/bobbylight/RSyntaxTextArea/blob/master/RSyntaxTextArea/src/main/java/org/fife/ui/rsyntaxtextarea/RSyntaxUtilities.java) · [花括号折叠](https://github.com/bobbylight/RSyntaxTextArea/blob/master/RSyntaxTextArea/src/main/java/org/fife/ui/rsyntaxtextarea/folding/CurlyFoldParser.java)

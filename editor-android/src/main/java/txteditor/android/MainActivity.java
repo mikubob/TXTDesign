@@ -32,6 +32,7 @@ import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import txteditor.core.TextCodec;
 import txteditor.core.TextKeys;
+import txteditor.core.EditorModel;
 import txteditor.core.text.LanguageId;
 
 public final class MainActivity extends AppCompatActivity {
@@ -71,12 +72,26 @@ public final class MainActivity extends AppCompatActivity {
         root.getViewTreeObserver().addOnGlobalLayoutListener(this::fitSearchPanel);
         editor = findViewById(R.id.editor);
         pattern = findViewById(R.id.pattern); replacement = findViewById(R.id.replacement);
-        editor.bind(state.core, () -> { captureFields(); state.edited(); refresh(); hideMatchCount(); });
+        editor.bind(state.core, changed -> {
+            captureFields(); state.edited(changed); refresh();
+            if (changed) hideMatchCount();
+        });
         highlight = new HighlightController(this::updateDocumentStatus);
         editor.attachHighlight(highlight);
         preview = findViewById(R.id.preview);
         preview.setLayoutManager(new LinearLayoutManager(this));
-        previewAdapter = new MarkdownAdapter(this);
+        previewAdapter = new MarkdownAdapter(this, this::revealPreviewSource);
+        editor.setOnScrollChangeListener((v, x, y, oldX, oldY) -> syncPreviewToEditor());
+        preview.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrolled(RecyclerView list, int dx, int dy) {
+                if (dy == 0 || !validPreview()) return;
+                int block = ((LinearLayoutManager) list.getLayoutManager()).findFirstVisibleItemPosition();
+                if (block < 0) return;
+                syncingScroll = true;
+                try { scrollSource(previewAdapter.document().start(block)); }
+                finally { syncingScroll = false; }
+            }
+        });
         preview.setAdapter(previewAdapter);
         ((MaterialButtonToggleGroup) findViewById(R.id.mode_group)).addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (settingMode || !isChecked) return;
@@ -95,7 +110,7 @@ public final class MainActivity extends AppCompatActivity {
         TextWatcher fields = new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             public void onTextChanged(CharSequence s, int start, int before, int count) { }
-            public void afterTextChanged(Editable s) { if (!settingFields) { captureFields(); state.edited(); updateFindButtons(); hideMatchCount(); } }
+            public void afterTextChanged(Editable s) { if (!settingFields) { captureFields(); state.edited(false); updateFindButtons(); hideMatchCount(); } }
         };
         pattern.addTextChangedListener(fields); replacement.addTextChangedListener(fields);
         findViewById(R.id.files).setOnClickListener(this::filesMenu);
@@ -115,6 +130,9 @@ public final class MainActivity extends AppCompatActivity {
         MaterialButton previous = findViewById(R.id.find_previous);
         previous.setText(TextKeys.PREVIOUS_MATCH);
         previous.setOnClickListener(v -> find(false, true));
+        MaterialButton replaceAll = findViewById(R.id.replace_all);
+        replaceAll.setText(TextKeys.REPLACE_ALL);
+        replaceAll.setOnClickListener(v -> replaceAll());
         findViewById(R.id.replace_one).setOnClickListener(v -> find(true));
         pattern.setOnEditorActionListener((v, action, event) -> {
             if (action != EditorInfo.IME_ACTION_SEARCH) return false;
@@ -137,15 +155,29 @@ public final class MainActivity extends AppCompatActivity {
 
     private void refresh() {
         if (state.language != appliedLanguage) {
+            editor.expandFold();
             appliedLanguage = state.language;
             highlight.setLanguage(state.language);
         }
         if (renderedVersion != state.documentVersion) {
+            editor.expandFold();
             editor.render();
             settingFields = true;
             pattern.setText(state.pattern); replacement.setText(state.replacement);
             settingFields = false;
-            editor.post(() -> editor.scrollTo(0, state.scroll));
+            int top = state.scroll, anchor = state.recentTop, version = state.documentVersion;
+            // TextView 在预绘制时自动把光标移入视口，恢复文件锚点需等它完成。
+            editor.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+                @Override public boolean onPreDraw() {
+                    editor.getViewTreeObserver().removeOnPreDrawListener(this);
+                    if (state.documentVersion != version) return true;
+                    if (anchor >= 0) {
+                        scrollSource(anchor);
+                        captureFields(); state.edited(false);
+                    } else editor.restoreScroll(top);
+                    return true;
+                }
+            });
             renderedVersion = state.documentVersion;
             hideMatchCount();
         }
@@ -161,7 +193,7 @@ public final class MainActivity extends AppCompatActivity {
         ViewCompat.setStateDescription(findViewById(R.id.search_toggle), getString(state.search ? R.string.state_expanded : R.string.state_collapsed));
         ViewCompat.setStateDescription(toggle, getString(replacing ? R.string.state_expanded : R.string.state_collapsed));
         findViewById(R.id.search_panel).post(this::fitSearchPanel);
-        int[] controls = {R.id.save, R.id.files, R.id.search_toggle, R.id.close_search, R.id.replace_toggle, R.id.find_next, R.id.find_previous, R.id.replace_one, R.id.pattern, R.id.replacement, R.id.editor, R.id.mode_source, R.id.mode_preview};
+        int[] controls = {R.id.save, R.id.files, R.id.search_toggle, R.id.close_search, R.id.replace_toggle, R.id.find_next, R.id.find_previous, R.id.replace_one, R.id.replace_all, R.id.pattern, R.id.replacement, R.id.editor, R.id.mode_source, R.id.mode_preview};
         for (int id : controls) findViewById(id).setEnabled(!state.busy);
         updateFindButtons();
         findViewById(R.id.undo).setEnabled(!state.busy && state.core.canUndo());
@@ -228,8 +260,74 @@ public final class MainActivity extends AppCompatActivity {
             preview.removeCallbacks(rebuildPreview);
             preview.postDelayed(rebuildPreview, 200);
         }
-        if (!live && previewShown) editor.post(() -> editor.scrollTo(0, state.scroll));
+        if (!live && previewShown) editor.post(() -> editor.restoreScroll(state.scroll));
         previewShown = live;
+    }
+
+    private int renderedPreviewVersion = -1;
+    private boolean syncingScroll;
+
+    private boolean validPreview() {
+        return isPreview() && renderedPreviewVersion == state.textVersion
+                && previewAdapter.document() != null && !previewAdapter.document().isPlain();
+    }
+
+    private void syncPreviewToEditor() {
+        if (syncingScroll || !validPreview() || editor.getLayout() == null || preview.getScrollState() != RecyclerView.SCROLL_STATE_IDLE) return;
+        int offset = topSourceOffset();
+        int block = previewAdapter.document().blockAt(offset);
+        LinearLayoutManager layout = (LinearLayoutManager) preview.getLayoutManager();
+        if (block >= 0 && block != layout.findFirstVisibleItemPosition()) layout.scrollToPositionWithOffset(block, 0);
+    }
+
+    private void scrollSource(int offset) {
+        android.text.Layout layout = editor.getLayout();
+        if (layout == null) return;
+        int line = layout.getLineForOffset(state.core.clampOffset(offset));
+        editor.restoreScroll(line == 0 ? 0 : layout.getLineTop(line) + editor.getTotalPaddingTop());
+    }
+
+    private int topSourceOffset() {
+        android.text.Layout layout = editor.getLayout();
+        if (layout == null) return 0;
+        int y = Math.max(0, editor.getScrollY() - editor.getTotalPaddingTop());
+        return state.core.clampOffset(layout.getLineStart(layout.getLineForVertical(y)));
+    }
+
+    private void revealPreviewSource(int offset) {
+        if (validPreview()) revealSource(offset);
+    }
+
+    private void revealSource(int offset) {
+        if (state.busy || editor.isComposing()) return;
+        editor.sync(false);
+        int caret = state.core.clampOffset(offset);
+        state.core.setSelection(caret, caret);
+        editor.render(); editor.requestFocus();
+        scrollSource(caret);
+    }
+
+    private void showOutline() {
+        final int version = state.textVersion;
+        final String text = state.core.getText();
+        if (TextCodec.exceedsUtf8Limit(text, TextCodec.STYLING_LIMIT_BYTES)) {
+            Toast.makeText(this, TextKeys.STYLING_TOO_LARGE, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (isPreview() && renderedPreviewVersion == version && previewAdapter.document() != null) {
+            showHeadings(previewAdapter.document(), version);
+        } else state.preview(text, doc -> showHeadings(doc, version));
+    }
+
+    private void showHeadings(txteditor.core.text.md.MdDocument doc, int version) {
+        if (isFinishing() || isDestroyed() || version != state.textVersion) return;
+        java.util.List<Integer> headings = doc.headings();
+        if (headings.isEmpty()) { Toast.makeText(this, TextKeys.NO_HEADINGS, Toast.LENGTH_SHORT).show(); return; }
+        String[] labels = new String[headings.size()];
+        for (int i = 0; i < labels.length; i++) labels[i] = doc.headingLabel(headings.get(i));
+        new MaterialAlertDialogBuilder(this).setTitle(TextKeys.OUTLINE).setItems(labels, (dialog, item) -> {
+            if (version == state.textVersion) revealSource(doc.start(headings.get(item)));
+        }).show();
     }
 
     private void buildPreview() {
@@ -248,7 +346,9 @@ public final class MainActivity extends AppCompatActivity {
         state.preview(text, document -> {
             if (isFinishing() || isDestroyed() || version != state.textVersion) return;
             previewAdapter.setDocument(document);
-            preview.scrollToPosition(previewPos);
+            renderedPreviewVersion = version;
+            if (document.isPlain()) preview.scrollToPosition(Math.max(0, previewPos));
+            else preview.post(this::syncPreviewToEditor);
         });
     }
 
@@ -264,7 +364,7 @@ public final class MainActivity extends AppCompatActivity {
         editor.sync(true);
         captureFields();
         state.viewMode = preview ? EditorViewModel.PREVIEW : EditorViewModel.SOURCE;
-        state.edited();
+        state.edited(false);
         refresh();
         if (preview) ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(editor.getWindowToken(), 0);
         else editor.requestFocus();
@@ -276,7 +376,7 @@ public final class MainActivity extends AppCompatActivity {
             editor.requestFocus();
             ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(editor.getWindowToken(), 0);
         }
-        refresh(); state.edited();
+        refresh(); state.edited(false);
         if (show) pattern.requestFocus();
     }
 
@@ -327,11 +427,13 @@ public final class MainActivity extends AppCompatActivity {
 
     private void captureFields() {
         state.pattern = pattern.getText().toString(); state.replacement = replacement.getText().toString();
+        state.positionTop = topSourceOffset();
+        state.recentTop = -1;
         state.scroll = editor.getScrollY(); // 编辑区常驻，预览分屏时滚动位置照常记录
     }
 
     private void filesMenu(View anchor) {
-        editor.sync(true);
+        editor.sync(false);
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add(0, 1, 0, R.string.new_document_item); menu.getMenu().add(0, 2, 1, R.string.open_item);
         // 最近打开按时间倒序（RecentFiles 写入时已置顶），直接续用上次的 SAF 授权。
@@ -342,6 +444,13 @@ public final class MainActivity extends AppCompatActivity {
         }
         menu.getMenu().add(0, 3, 3, R.string.save_as); menu.getMenu().add(0, 4, 4, R.string.close_document);
         menu.getMenu().add(0, 10, 5, TextKeys.GO_TO_LINE);
+        if (state.language == LanguageId.MARKDOWN) menu.getMenu().add(0, 11, 6, TextKeys.OUTLINE);
+        menu.getMenu().add(0, 12, 7, TextKeys.LINE_NUMBERS).setCheckable(true).setChecked(editor.lineNumbers());
+        menu.getMenu().add(0, 13, 8, TextKeys.TOGGLE_FOLD);
+        for (EditorModel.Command command : EditorModel.Command.values()) {
+            if (!command.markdownOnly() || state.language == LanguageId.MARKDOWN)
+                menu.getMenu().add(0, 20 + command.ordinal(), 9, command.title);
+        }
         if (findViewById(R.id.edit_actions).getVisibility() == View.GONE) {
             if (!isPreview()) {
                 menu.getMenu().add(0, 5, 5, R.string.undo).setEnabled(state.core.canUndo());
@@ -358,6 +467,13 @@ public final class MainActivity extends AppCompatActivity {
                 if (id - 100 < recents.size()) { pendingUri = recents.get(id - 100).uri; guard(EditorViewModel.OPEN); }
                 return true;
             }
+            if (id >= 20) {
+                if (editor.isComposing() || state.busy) return true;
+                editor.sync(false);
+                state.core.apply(EditorModel.Command.values()[id - 20]);
+                editor.render(); editor.requestFocus(); captureFields(); state.edited(true); refresh(); hideMatchCount();
+                return true;
+            }
             switch (id) {
                 case 1: newTypeDialog(); break;
                 case 2: pendingUri = null; guard(EditorViewModel.OPEN); break;
@@ -368,6 +484,12 @@ public final class MainActivity extends AppCompatActivity {
                 case 7: showSearch(!state.search); break;
                 case 8: setMode(!isPreview()); break;
                 case 10: goToLine(); break;
+                case 11: showOutline(); break;
+                case 12: editor.setLineNumbers(!editor.lineNumbers()); break;
+                case 13:
+                    if (!editor.isComposing() && !editor.toggleFold())
+                        Toast.makeText(this, TextKeys.NO_FOLD, Toast.LENGTH_SHORT).show();
+                    break;
                 default: return false;
             }
             return true;
@@ -386,9 +508,9 @@ public final class MainActivity extends AppCompatActivity {
 
     private void history(boolean redo) {
         editor.sync(true);
-        if (redo) state.core.redo(); else state.core.undo();
+        boolean changed = redo ? state.core.redo() : state.core.undo();
         hideMatchCount();
-        editor.render(); captureFields(); state.edited(); refresh();
+        editor.render(); captureFields(); state.edited(changed); refresh();
     }
 
     /** 空查找词时禁用「下一处 / 替换」，与桌面端一致；输入法的直接提交仍由 find() 兜住。 */
@@ -397,6 +519,7 @@ public final class MainActivity extends AppCompatActivity {
         findViewById(R.id.find_next).setEnabled(ready);
         findViewById(R.id.find_previous).setEnabled(ready);
         findViewById(R.id.replace_one).setEnabled(ready);
+        findViewById(R.id.replace_all).setEnabled(ready);
     }
 
     private void hideMatchCount() { findViewById(R.id.match_count).setVisibility(View.GONE); }
@@ -419,14 +542,28 @@ public final class MainActivity extends AppCompatActivity {
                 end = start + needle.length(); state.core.setSelection(start, end);
             }
             if (replace) state.core.replace(start, end, state.replacement);
-            editor.render(); editor.requestFocus(); state.edited(); refresh();
+            editor.render(); editor.requestFocus(); state.edited(replace); refresh();
             showMatchCount(state.core.countMatches(needle));
         } catch (IllegalArgumentException error) { Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show(); }
     }
 
-    private void showMatchCount(int count) {
+    private void replaceAll() {
+        if (state.busy) return;
+        captureFields();
+        if (state.pattern.isEmpty()) return;
+        editor.sync(true);
+        try {
+            int count = state.core.replaceAll(state.pattern, state.replacement);
+            if (count > 0) { editor.render(); state.edited(!state.pattern.equals(state.replacement)); refresh(); }
+            showSearchResult(TextKeys.of(TextKeys.REPLACED_COUNT, count));
+        } catch (IllegalArgumentException error) { Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show(); }
+    }
+
+    private void showMatchCount(int count) { showSearchResult(TextKeys.of(TextKeys.MATCH_COUNT, count)); }
+
+    private void showSearchResult(String message) {
         TextView result = findViewById(R.id.match_count);
-        result.setText(TextKeys.of(TextKeys.MATCH_COUNT, count));
+        result.setText(message);
         result.setVisibility(View.VISIBLE);
     }
 
@@ -523,7 +660,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     @Override protected void onStop() {
-        if (!state.busy) { editor.sync(true); captureFields(); state.persist(); }
+        if (!state.busy) { editor.sync(true); captureFields(); state.rememberPosition(); state.persist(); }
         super.onStop();
     }
 

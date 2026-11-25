@@ -128,10 +128,51 @@ public final class CoreTest {
         }
     }
 
+    private static void editorCommands() {
+        EditorModel model = new EditorModel();
+        model.load("a\n  b\nc");
+        model.setSelection(0, 6);
+        model.apply(EditorModel.Command.INDENT);
+        eq("    a\n      b\nc", model.getText());
+        model.apply(EditorModel.Command.OUTDENT);
+        eq("a\n  b\nc", model.getText());
+        check(model.undo()); check(model.undo()); check(!model.canUndo());
+        eq(6, model.getSelectionEnd());
+        model.setSelection(6, 6);
+        model.apply(EditorModel.Command.DUPLICATE);
+        eq("a\n  b\nc\nc", model.getText());
+        eq(4, model.getLineCount());
+        check(model.undo());
+        model.apply(EditorModel.Command.TASK);
+        eq("a\n  b\n- [ ] c", model.getText());
+        model.load("");
+        model.apply(EditorModel.Command.FENCE);
+        eq(8, model.length());
+        eq(4, model.getSelectionEnd());
+        check(model.undo()); check(model.redo());
+        eq(4, model.getSelectionEnd());
+        model.load(new String(Character.toChars(0x1f600)));
+        eq(0, model.clampOffset(1));
+        eq(2, model.clampOffset(100));
+    }
+
     private static void navigation() {
+        editorCommands();
         EditorModel model = new EditorModel();
         model.load("aaa\n😀\n");
         eq(2, model.countMatches("aa"));
+        model.load("aaa 😀 AAA aa");
+        model.setSelection(4, 6);
+        eq(2, model.replaceAll("aa", ""));
+        eq("a 😀 AAA ", model.getText());
+        eq(true, model.undo());
+        eq("aaa 😀 AAA aa", model.getText());
+        eq(4, model.getSelectionStart());
+        eq(6, model.getSelectionEnd());
+        eq(0, model.replaceAll("missing", ""));
+        eq(1, model.replaceAll("😀", "😀"));
+        eq(true, model.redo());
+        model.load("aaa\n" + Character.toString((char) 0xd83d) + Character.toString((char) 0xde00) + "\n");
         eq(1, model.findPrevious("aa", 0));
         eq(0, model.findPrevious("aa", 2));
         eq(-1, model.findPrevious("不存在", 3));

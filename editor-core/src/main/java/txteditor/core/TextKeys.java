@@ -12,6 +12,20 @@ public final class TextKeys {
     public static final String TOO_LARGE_REFUSED = "file.tooLargeRefused";
 
     public static final String PREVIOUS_MATCH = "上一处";
+    public static final String TOGGLE_FOLD = "折叠或展开代码块";
+    public static final String NO_FOLD = "当前行附近没有可折叠的代码块。";
+    public static final String LINE_NUMBERS = "显示行号";
+    public static final String OUTLINE = "Markdown 大纲";
+    public static final String NO_HEADINGS = "当前没有可定位的 Markdown 标题。";
+    public static final String GO_TO_SOURCE = "定位到源码";
+    public static final String INDENT = "缩进";
+    public static final String OUTDENT = "反缩进";
+    public static final String DUPLICATE_LINE = "复制当前行";
+    public static final String INSERT_TASK = "插入待办";
+    public static final String INSERT_FENCE = "插入代码围栏";
+    public static final String REPLACE_TOO_LARGE = "全部替换后的文档会超过 16 MiB，已保留原文。";
+    public static final String REPLACE_ALL = "全部替换";
+    public static final String REPLACED_COUNT = "search.replacedCount";
     public static final String MATCH_COUNT = "search.matchCount";
     public static final String GO_TO_LINE = "跳转到行";
     public static final String LINE_RANGE = "search.lineRange";
@@ -26,6 +40,7 @@ public final class TextKeys {
         String template;
         if (SAVE_FAILED.equals(key)) template = "保存失败；编辑内容仍在窗口中。";
         else if (NOT_UTF8.equals(key)) template = "文件不是有效 UTF-8；请先在其他工具中转换编码。当前内容保留。";
+        else if (REPLACED_COUNT.equals(key)) template = "已替换 %d 处";
         else if (MATCH_COUNT.equals(key)) template = "共 %d 处匹配";
         else if (LINE_RANGE.equals(key)) template = "输入行号（1–%d）";
         else if (NOT_FOUND.equals(key)) template = "未找到：%s";

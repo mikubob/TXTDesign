@@ -57,6 +57,7 @@ public final class EditorWindow extends JFrame {
     private final JMenu recentMenu = new JMenu("最近文件");
     private final JPanel recentBar = new JPanel(new FlowLayout(FlowLayout.LEADING, 4, 0));
     private final Map<LanguageId, JRadioButtonMenuItem> languageItems = new EnumMap<LanguageId, JRadioButtonMenuItem>(LanguageId.class);
+    private final Map<Path, Point> recentPositions = new java.util.HashMap<Path, Point>();
     private final List<Path> recent = new ArrayList<Path>();
     private final Properties prefs;
     private final Timer sessionTimer = new Timer(700, event -> persistSession());
@@ -69,7 +70,7 @@ public final class EditorWindow extends JFrame {
     private final JSplitPane split;
     private final List<Action> actions = new ArrayList<Action>();
     private final List<JComponent> searchControls = new ArrayList<JComponent>();
-    private Action undoAction, redoAction, nextAction, previousAction, replaceAction, zoomInAction, zoomOutAction, themeAction, previewAction;
+    private Action undoAction, redoAction, nextAction, previousAction, replaceAction, replaceAllAction, zoomInAction, zoomOutAction, themeAction, previewAction;
     private Action saveAction;
     private JToggleButton previewToggle;
     private JRadioButtonMenuItem themeSystem, themeLight, themeDark;
@@ -82,6 +83,36 @@ public final class EditorWindow extends JFrame {
     private boolean docked;
     private int zoom = 100;
     private String previewSource;
+    private boolean previewStale, syncingScroll;
+    private boolean showLineNumbers;
+    private int foldedHead = -1, foldedClose = -1;
+    private final JComponent gutter = new JComponent() {
+        @Override public Dimension getPreferredSize() {
+            int digits = showLineNumbers ? Math.max(2, String.valueOf(model.getLineCount()).length()) : 0;
+            if (foldedHead > 0) digits++;
+            return new Dimension(getFontMetrics(area.getFont()).charWidth('0') * digits + UIScale.scale(14), 0);
+        }
+
+        @Override protected void paintComponent(Graphics g) {
+            Rectangle clip = g.getClipBounds();
+            g.setColor(area.getBackground());
+            g.fillRect(clip.x, clip.y, clip.width, clip.height);
+            g.setFont(area.getFont());
+            g.setColor(area.getForeground());
+            int line = model.lineAt(area.viewToModel(new Point(area.getInsets().left, clip.y)));
+            while (line <= model.getLineCount()) {
+                if (foldedHead > 0 && line > foldedHead && line < foldedClose) line = foldedClose;
+                try {
+                    Rectangle bounds = area.modelToView(model.lineStart(line));
+                    if (bounds == null || bounds.y >= clip.y + clip.height) break;
+                    String number = line == foldedHead ? showLineNumbers ? line + "…" : "…" : showLineNumbers ? String.valueOf(line) : "";
+                    line++;
+                    g.drawString(number, getWidth() - UIScale.scale(7) - g.getFontMetrics().stringWidth(number),
+                            bounds.y + bounds.height - g.getFontMetrics().getDescent());
+                } catch (javax.swing.text.BadLocationException stale) { break; }
+            }
+        }
+    };
     private long fileModified;
     private long fileSize;
     private String themeMode = "system";
@@ -102,7 +133,13 @@ public final class EditorWindow extends JFrame {
         area.getAccessibleContext().setAccessibleName("纯文本编辑区");
         query.getAccessibleContext().setAccessibleName("查找词，区分大小写");
         replacement.getAccessibleContext().setAccessibleName("替换文本");
+        area.setEditorKit(new FoldingEditorKit());
         binding = new EditorBinding(area, model, this::documentChanged, this::showError);
+        area.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { sourceChanged(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { sourceChanged(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { }
+        });
         area.addPropertyChangeListener(SyntaxPainter.LIMITED, event -> updateState());
         JMenuBar menus = new JMenuBar();
         JMenu files = new JMenu("文件"); files.setMnemonic(KeyEvent.VK_F);
@@ -126,6 +163,10 @@ public final class EditorWindow extends JFrame {
         addAction(edit, "复制", "control C", () -> focusedText().copy());
         addAction(edit, "粘贴", "control V", () -> focusedText().paste());
         addAction(edit, "全选", "control A", () -> focusedText().selectAll());
+        edit.addSeparator();
+        for (EditorModel.Command command : EditorModel.Command.values()) {
+            addAction(edit, command.title, null, () -> runEdit(command));
+        }
         JMenu searchMenu = new JMenu("查找");
         addAction(searchMenu, "查找…", "control F", () -> showSearch(false));
         nextAction = addAction(searchMenu, "下一处", "F3", this::find);
@@ -133,6 +174,7 @@ public final class EditorWindow extends JFrame {
         addAction(searchMenu, TextKeys.GO_TO_LINE + "…", "control G", this::goToLine);
         Action showReplace = addAction(searchMenu, "替换…", "control H", () -> showSearch(true));
         replaceAction = action("替换当前", null, this::replaceCurrent);
+        replaceAllAction = addAction(searchMenu, TextKeys.REPLACE_ALL, null, this::replaceAll);
         Action closeSearch = action("关闭查找", "ESCAPE", this::closeSearch);
         JMenu view = new JMenu("视图");
         ButtonGroup modes = new ButtonGroup();
@@ -145,6 +187,11 @@ public final class EditorWindow extends JFrame {
         Action resetZoom = addAction(view, "重置缩放", "control 0", () -> setZoom(100));
         view.addSeparator();
         previewAction = addAction(view, "预览 Markdown", "control E", () -> setPreview(!previewMode));
+        JCheckBoxMenuItem numbers = new JCheckBoxMenuItem(TextKeys.LINE_NUMBERS);
+        numbers.addActionListener(e -> setLineNumbers(numbers.isSelected()));
+        view.add(numbers);
+        addAction(view, TextKeys.TOGGLE_FOLD, null, this::toggleFold);
+        addAction(view, TextKeys.OUTLINE, null, this::showOutline);
         view.addSeparator();
         JMenu languageMenu = new JMenu("语言");
         ButtonGroup languageGroup = new ButtonGroup();
@@ -224,7 +271,11 @@ public final class EditorWindow extends JFrame {
         findRow.add(findButtons, BorderLayout.EAST);
         surface(replaceRow); JLabel replaceLabel = new JLabel("替换"); replaceLabel.setLabelFor(replacement);
         replaceRow.add(replaceLabel, BorderLayout.WEST); replaceRow.add(replacement, BorderLayout.CENTER);
-        replaceRow.add(button(replaceAction, null, false), BorderLayout.EAST);
+        JPanel replaceButtons = new JPanel(new FlowLayout(FlowLayout.TRAILING, 4, 0));
+        replaceButtons.setOpaque(false);
+        replaceButtons.add(button(replaceAction, null, false));
+        replaceButtons.add(button(replaceAllAction, null, false));
+        replaceRow.add(replaceButtons, BorderLayout.EAST);
         JPanel searchRows = surface(new JPanel(new BorderLayout(0, 8)));
         searchRows.add(findRow, BorderLayout.NORTH); searchRows.add(replaceRow, BorderLayout.SOUTH);
         searchPanel.add(searchRows, BorderLayout.CENTER); searchPanel.add(muted(searchResult), BorderLayout.SOUTH);
@@ -251,6 +302,23 @@ public final class EditorWindow extends JFrame {
         // 预览固定占右侧一块（可拖动分隔条调整），窗口变大时多出的宽度留给源码。
         previewScroll.setPreferredSize(new Dimension(UIScale.scale(420), 0));
         this.previewScroll = previewScroll;
+        scroll.getVerticalScrollBar().addAdjustmentListener(e -> syncPreviewScroll(true));
+        previewScroll.getVerticalScrollBar().addAdjustmentListener(e -> syncPreviewScroll(false));
+        JPopupMenu previewMenu = new JPopupMenu();
+        JMenuItem locate = new JMenuItem(TextKeys.GO_TO_SOURCE);
+        locate.addActionListener(e -> {
+            int block = preview.blockAt(preview.pane().getCaretPosition());
+            if (!previewStale && block >= 0) revealSource(preview.document().start(block));
+        });
+        previewMenu.add(locate);
+        preview.pane().setComponentPopupMenu(previewMenu);
+        preview.pane().addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() != 2 || !SwingUtilities.isLeftMouseButton(e) || previewStale) return;
+                int block = preview.blockAt(preview.pane().viewToModel(e.getPoint()));
+                if (block >= 0) revealSource(preview.document().start(block));
+            }
+        });
         // 预览是源码右侧的分屏而不是替换：边写边看，右侧为空时源码独占整行。
         split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, scroll, null);
         split.setBorder(BorderFactory.createEmptyBorder());
@@ -442,7 +510,8 @@ public final class EditorWindow extends JFrame {
         searchResult.setText("区分大小写 · 按字面查找 · 末尾自动回绕");
         nextAction.setEnabled(!busy && !query.getText().isEmpty());
         previousAction.setEnabled(nextAction.isEnabled());
-        replaceAction.setEnabled(!busy && !readOnly && !query.getText().isEmpty());
+        replaceAllAction.setEnabled(!busy && !readOnly && !query.getText().isEmpty());
+        replaceAction.setEnabled(replaceAllAction.isEnabled());
     }
 
     private void setTheme(String mode) {
@@ -485,6 +554,7 @@ public final class EditorWindow extends JFrame {
         zoom = Math.max(70, Math.min(200, value));
         float size = UIScale.scale(18f) * zoom / 100;
         binding.setFontSize(area.getFont().deriveFont(size));
+        if (showLineNumbers) { gutter.revalidate(); gutter.repaint(); }
         zoomLabel.setText(zoom + "%");
         if (zoomInAction != null) zoomInAction.setEnabled(!busy && zoom < 200);
         if (zoomOutAction != null) zoomOutAction.setEnabled(!busy && zoom > 70);
@@ -507,18 +577,133 @@ public final class EditorWindow extends JFrame {
     /** 实时预览：文本没变就不重排，重建后把滚动位置放回原处。 */
     private void renderPreview() {
         String text = model.getText();
+        previewStale = false;
         if (text.equals(previewSource)) return;
         previewSource = text;
-        JScrollBar bar = previewScroll.getVerticalScrollBar();
-        int value = bar.getValue();
-        preview.render(text, FlatLaf.isLafDark());
-        SwingUtilities.invokeLater(() -> bar.setValue(value));
+        syncingScroll = true;
+        try { preview.render(text, FlatLaf.isLafDark()); }
+        finally { syncingScroll = false; }
+        SwingUtilities.invokeLater(() -> syncPreviewScroll(true));
+    }
+
+    void setLineNumbers(boolean visible) {
+        showLineNumbers = visible;
+        scroll.setRowHeaderView(visible || foldedHead > 0 ? gutter : null);
+    }
+
+    private void sourceChanged() {
+        previewStale = true;
+        if (previewMode) previewTimer.restart();
+        expandAfterEdit();
+    }
+
+    private void expandAfterEdit() {
+        if (foldedHead > 0) SwingUtilities.invokeLater(this::expandFold);
+    }
+
+    private void expandFold() {
+        if (foldedHead < 0) return;
+        foldedHead = foldedClose = -1;
+        javax.swing.text.SimpleAttributeSet attrs = new javax.swing.text.SimpleAttributeSet();
+        attrs.addAttribute(FoldingEditorKit.HIDDEN, Boolean.FALSE);
+        area.getStyledDocument().setParagraphAttributes(0, area.getDocument().getLength(), attrs, false);
+        setLineNumbers(showLineNumbers);
+        gutter.repaint();
+    }
+
+    void toggleFold() {
+        if (busy || binding.isComposing()) return;
+        if (foldedHead > 0) { expandFold(); return; }
+        int[] range = binding.painter.fold(model.getSelectionEnd());
+        if (range.length == 0) { status.setText(TextKeys.NO_FOLD); return; }
+        foldedHead = range[0] + 1; foldedClose = range[1] + 1;
+        int head = model.lineStart(foldedHead);
+        model.setSelection(head, head); binding.syncSelection();
+        int start = model.lineStart(foldedHead + 1), end = model.lineStart(foldedClose);
+        javax.swing.text.SimpleAttributeSet attrs = new javax.swing.text.SimpleAttributeSet();
+        attrs.addAttribute(FoldingEditorKit.HIDDEN, Boolean.TRUE);
+        area.getStyledDocument().setParagraphAttributes(start, end - start, attrs, false);
+        setLineNumbers(showLineNumbers);
+        gutter.repaint();
+    }
+
+    private void showOutline() {
+        if (busy || binding.isComposing() || language != LanguageId.MARKDOWN) return;
+        if (previewMode) renderPreview();
+        String text = model.getText();
+        if (txteditor.core.TextCodec.exceedsUtf8Limit(text, txteditor.core.TextCodec.STYLING_LIMIT_BYTES)) {
+            showError(TextKeys.STYLING_TOO_LARGE);
+            return;
+        }
+        txteditor.core.text.md.MdDocument doc = previewMode ? preview.document() : txteditor.core.text.md.MdParser.parse(text);
+        List<Integer> headings = doc.headings();
+        if (headings.isEmpty()) { showError(TextKeys.NO_HEADINGS); return; }
+        JList<String> list = new JList<String>(headings.stream().map(doc::headingLabel).toArray(String[]::new));
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setSelectedIndex(0);
+        list.setVisibleRowCount(Math.min(12, headings.size()));
+        JOptionPane options = new JOptionPane(new JScrollPane(list), JOptionPane.PLAIN_MESSAGE,
+                JOptionPane.OK_CANCEL_OPTION);
+        JDialog dialog = options.createDialog(this, TextKeys.OUTLINE);
+        list.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent event) {
+                int row = list.locationToIndex(event.getPoint());
+                if (row < 0 || !list.getCellBounds(row, row).contains(event.getPoint())) return;
+                list.setSelectedIndex(row);
+                options.setValue(JOptionPane.OK_OPTION);
+                dialog.setVisible(false);
+            }
+        });
+        dialog.setVisible(true);
+        dialog.dispose();
+        if (Integer.valueOf(JOptionPane.OK_OPTION).equals(options.getValue()) && list.getSelectedIndex() >= 0)
+            revealSource(doc.start(headings.get(list.getSelectedIndex())));
+    }
+
+    private void revealSource(int offset) {
+        if (busy || binding.isComposing()) return;
+        binding.finishInput();
+        int caret = model.clampOffset(offset);
+        model.setSelection(caret, caret);
+        binding.syncSelection();
+        scrollTo(area, scroll, caret);
+        area.requestFocusInWindow();
+    }
+
+    private void syncPreviewScroll(boolean fromSource) {
+        if (!previewMode || previewStale || syncingScroll || preview.document() == null) return;
+        txteditor.core.text.md.MdDocument doc = preview.document();
+        if (doc.count() == 0 || doc.isPlain()) return;
+        int source = area.viewToModel(new Point(area.getInsets().left, scroll.getViewport().getViewPosition().y));
+        int rendered = preview.pane().viewToModel(new Point(preview.pane().getInsets().left,
+                previewScroll.getViewport().getViewPosition().y));
+        int sourceBlock = doc.blockAt(source), previewBlock = preview.blockAt(rendered);
+        if (sourceBlock == previewBlock || previewBlock < 0) return;
+        syncingScroll = true;
+        try {
+            if (fromSource) scrollTo(preview.pane(), previewScroll, preview.renderedStart(sourceBlock));
+            else scrollTo(area, scroll, doc.start(previewBlock));
+        } finally { syncingScroll = false; }
+    }
+
+    private static void scrollTo(JTextPane pane, JScrollPane scrollPane, int offset) {
+        if (offset == 0) {
+            scrollPane.getVerticalScrollBar().setValue(0);
+            return;
+        }
+        try {
+            Rectangle bounds = pane.modelToView(offset);
+            if (bounds != null) scrollPane.getVerticalScrollBar().setValue(bounds.y);
+        } catch (javax.swing.text.BadLocationException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     /** 识别到新语言：只在真的变了时才通知高亮器，避免打开文件时白扫一遍旧文本。 */
     private void adoptLanguage(LanguageId next) {
         if (next == null) next = LanguageId.PLAIN;
         if (next != language) {
+            expandFold();
             language = next;
             binding.setLanguage(next);
         }
@@ -560,6 +745,24 @@ public final class EditorWindow extends JFrame {
         catch (NumberFormatException invalid) { /* 与越界行号使用同一范围提示。 */ }
         if (offset < 0) { showError(hint); return; }
         model.setSelection(offset, offset); binding.syncSelection(); area.requestFocusInWindow();
+    }
+
+    private void runEdit(EditorModel.Command command) {
+        if (busy || readOnly || binding.isComposing()) return;
+        if (command.markdownOnly() && language != LanguageId.MARKDOWN) return;
+        binding.finishInput();
+        model.apply(command);
+        binding.refresh(); area.requestFocusInWindow();
+    }
+
+    void replaceAll() {
+        if (busy || readOnly || query.getText().isEmpty()) return;
+        binding.finishInput();
+        try {
+            int count = model.replaceAll(query.getText(), replacement.getText());
+            if (count > 0) binding.refresh();
+            searchResult.setText(TextKeys.of(TextKeys.REPLACED_COUNT, count));
+        } catch (IllegalArgumentException invalid) { showError(invalid.getMessage()); }
     }
 
     void replaceCurrent() {
@@ -622,6 +825,7 @@ public final class EditorWindow extends JFrame {
 
     /** 打开一条路径；拖放、最近文件与选择器共用。 */
     private void openPath(Path chosen) {
+        rememberPosition();
         setBusy(true);
         new SwingWorker<SafeFiles.Loaded, Void>() {
             protected SafeFiles.Loaded doInBackground() throws Exception { return SafeFiles.readForDisplay(chosen, EditorStore.limit()); }
@@ -630,6 +834,7 @@ public final class EditorWindow extends JFrame {
                 try {
                     SafeFiles.Loaded loaded = get();
                     String text = loaded.text;
+                    expandFold();
                     model.load(text);
                     binding.endGroup();
                     file = chosen; readOnly = loaded.partial;
@@ -637,7 +842,14 @@ public final class EditorWindow extends JFrame {
                     addRecent(chosen); EditorStore.clearSession(); restored = false;
                     adoptLanguage(detectLanguage(chosen, text));
                     if (previewMode) renderPreview();
-                    binding.refresh(); area.setCaretPosition(0);
+                    Point position = recentPositions.get(chosen);
+                    int caret = position == null ? 0 : model.clampOffset(position.x);
+                    model.setSelection(caret, caret);
+                    binding.refresh();
+                    int top = position == null ? 0 : model.clampOffset(position.y);
+                    SwingUtilities.invokeLater(() -> {
+                        if (chosen.equals(file)) scrollTo(area, scroll, model.clampOffset(top));
+                    });
                     success = true;
                 } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); showError("打开被中断；原内容保留。"); }
                 catch (ExecutionException failed) { showError(fileError(failed.getCause())); }
@@ -663,6 +875,8 @@ public final class EditorWindow extends JFrame {
     }
 
     private void newDocument(LanguageId type) {
+        rememberPosition();
+        expandFold();
         model.load(""); binding.endGroup();
         file = null; readOnly = false; restored = false; previewSource = null;
         adoptLanguage(type);
@@ -701,6 +915,7 @@ public final class EditorWindow extends JFrame {
                 String failure = null;
                 try {
                     get();
+                    rememberPosition();
                     boolean renamed = file == null || !chosen.equals(file);
                     file = chosen; readOnly = false;
                     fileModified = EditorStore.modifiedTime(chosen); fileSize = EditorStore.size(chosen);
@@ -760,7 +975,15 @@ public final class EditorWindow extends JFrame {
     private void loadRecent() {
         for (int i = 0; i < RECENT_LIMIT; i++) {
             String value = prefs.getProperty("recent." + i);
-            if (value != null && !value.isEmpty()) { Path path = Paths.get(value); if (!recent.contains(path)) recent.add(path); }
+            if (value == null || value.isEmpty()) continue;
+            Path path = Paths.get(value);
+            if (recent.contains(path)) continue;
+            recent.add(path);
+            try {
+                int caret = Integer.parseInt(prefs.getProperty("recent.caret." + i, "0"));
+                int top = Integer.parseInt(prefs.getProperty("recent.top." + i, "0"));
+                recentPositions.put(path, new Point(caret, Math.max(0, top)));
+            } catch (NumberFormatException invalid) { /* 旧记录与损坏位置均从开头打开。 */ }
         }
         while (recent.size() > RECENT_LIMIT) recent.remove(recent.size() - 1);
         rebuildRecent();
@@ -768,8 +991,14 @@ public final class EditorWindow extends JFrame {
 
     private void addRecent(Path path) {
         recent.remove(path); recent.add(0, path);
-        while (recent.size() > RECENT_LIMIT) recent.remove(recent.size() - 1);
+        while (recent.size() > RECENT_LIMIT) recentPositions.remove(recent.remove(recent.size() - 1));
         rebuildRecent();
+    }
+
+    private void rememberPosition() {
+        if (file == null) return;
+        int top = area.viewToModel(new Point(area.getInsets().left, scroll.getViewport().getViewPosition().y));
+        recentPositions.put(file, new Point(area.getCaretPosition(), model.clampOffset(top)));
     }
 
     /** 菜单与顶部标签条共用同一份最近文件列表；缺失的文件置灰保留，方便用户把文件找回来。 */
@@ -847,6 +1076,7 @@ public final class EditorWindow extends JFrame {
     }
 
     private void shutdown() {
+        rememberPosition();
         sessionTimer.stop();
         persistSession();
         EditorStore.clearSession();
@@ -855,8 +1085,12 @@ public final class EditorWindow extends JFrame {
         prefs.setProperty("bounds", bounds.x + "," + bounds.y + "," + bounds.width + "," + bounds.height);
         prefs.setProperty("zoom", String.valueOf(zoom));
         for (int i = 0; i < RECENT_LIMIT; i++) {
-            if (i < recent.size()) prefs.setProperty("recent." + i, recent.get(i).toString());
-            else prefs.remove("recent." + i);
+            Path path = i < recent.size() ? recent.get(i) : null;
+            Point position = recentPositions.get(path);
+            if (path == null) prefs.remove("recent." + i);
+            else prefs.setProperty("recent." + i, path.toString());
+            prefs.setProperty("recent.caret." + i, String.valueOf(position == null ? 0 : position.x));
+            prefs.setProperty("recent.top." + i, String.valueOf(position == null ? 0 : position.y));
         }
         prefs.setProperty("lastExit", String.valueOf(System.currentTimeMillis()));
         EditorStore.savePrefs(prefs);
@@ -865,9 +1099,12 @@ public final class EditorWindow extends JFrame {
 
     private void documentChanged() {
         restored = false;
+        if (foldedHead > 0 && (model.lineAt(model.getSelectionStart()) > foldedHead
+                && model.lineAt(model.getSelectionStart()) < foldedClose || model.lineAt(model.getSelectionEnd()) > foldedHead
+                && model.lineAt(model.getSelectionEnd()) < foldedClose)) expandAfterEdit();
+        if (showLineNumbers || foldedHead > 0) { gutter.revalidate(); gutter.repaint(); }
         updateState();
         sessionTimer.restart();
-        if (previewMode) previewTimer.restart();
     }
 
     private void setBusy(boolean value) {
@@ -905,7 +1142,8 @@ public final class EditorWindow extends JFrame {
         if (nextAction != null) {
             nextAction.setEnabled(!busy && !query.getText().isEmpty());
             previousAction.setEnabled(nextAction.isEnabled());
-            replaceAction.setEnabled(!busy && !readOnly && !query.getText().isEmpty());
+            replaceAllAction.setEnabled(!busy && !readOnly && !query.getText().isEmpty());
+            replaceAction.setEnabled(replaceAllAction.isEnabled());
             zoomInAction.setEnabled(!busy && zoom < 200); zoomOutAction.setEnabled(!busy && zoom > 70);
         }
     }

@@ -40,7 +40,10 @@ public final class GuiTest {
                 eq(0, window.area.getSelectionStart()); eq(2, window.area.getSelectionEnd());
                 menu("查找", "上一处").doClick(); eq(9, window.area.getSelectionStart());
                 menu("查找", "上一处").doClick(); eq(0, window.area.getSelectionStart());
-                window.replacement.setText("替换"); window.replaceCurrent(); eq("替换😀\n第二行\n中文", window.model.getText());
+                window.replacement.setText("替换");
+                menu("查找", "全部替换").doClick(); eq("替换" + new String(Character.toChars(0x1f600)) + "\n第二行\n替换", window.model.getText());
+                menu("编辑", "撤销").doClick();
+                window.replaceCurrent(); eq("替换😀\n第二行\n中文", window.model.getText());
                 menu("编辑", "撤销").doClick(); eq("中文😀\n第二行\n中文", SyntaxPainter.text(window.area));
                 menu("编辑", "重做").doClick(); eq("替换😀\n第二行\n中文", SyntaxPainter.text(window.area));
                 window.area.select(0, 2); window.area.copy(); window.area.setCaretPosition(SyntaxPainter.text(window.area).length()); window.area.paste();
@@ -77,6 +80,7 @@ public final class GuiTest {
             System.out.println("GuiTest: cancel/save leave checked; reopening");
             invokeMenu("文件", "打开…"); choose(saved);
             waitFor(() -> edt(() -> window.model.getText().endsWith("未保存") && window.area.isEditable()));
+            edt(() -> { eq(window.model.length(), window.area.getCaretPosition()); return null; });
             Path invalid = directory.resolve("bad.txt"); Files.write(invalid, new byte[] {(byte) 0xff});
             String before = edt(() -> window.model.getText());
             invokeMenu("文件", "打开…"); choose(invalid); clickAnyError();
@@ -255,6 +259,32 @@ public final class GuiTest {
             check(attrs(window, comment).isDefined(javax.swing.text.StyleConstants.Foreground));
             check(javax.swing.text.StyleConstants.isItalic(attrs(window, comment)));
             check(!menu("视图", "预览 Markdown").isEnabled());
+            menu("视图", "显示行号").doClick();
+            JScrollPane scroll = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, window.area);
+            check(scroll.getRowHeader().getView() != null);
+            window.area.setCaretPosition(source.indexOf('{') + 1);
+            return null;
+        });
+        waitFor(() -> edt(() -> window.area.getHighlighter().getHighlights().length == 2));
+        edt(() -> {
+            eq(source.indexOf('{'), window.area.getHighlighter().getHighlights()[0].getStartOffset());
+            eq(source.lastIndexOf('}'), window.area.getHighlighter().getHighlights()[1].getStartOffset());
+            check(!window.model.canUndo());
+            menu("视图", "显示行号").doClick();
+            return null;
+        });
+        edt(() -> {
+            window.area.setCaretPosition(source.indexOf("int"));
+            Rectangle before = window.area.modelToView(source.lastIndexOf('}'));
+            menu("视图", "折叠或展开代码块").doClick();
+            window.validate();
+            Rectangle folded = window.area.modelToView(source.lastIndexOf('}'));
+            check(folded.y < before.y);
+            eq(source, window.model.getText());
+            check(!window.model.canUndo());
+            menu("视图", "折叠或展开代码块").doClick();
+            window.validate();
+            eq(before.y, window.area.modelToView(source.lastIndexOf('}')).y);
             return null;
         });
         robot.waitForIdle();
@@ -277,7 +307,9 @@ public final class GuiTest {
         String source = "# 标题\n\n段落 **粗体** 与 `代码` 与 [链接](https://example.com)。\n\n"
                 + "- 项目一\n- 项目二\n\n> 引用一行\n\n```java\nclass A { int value = 1; }\n```\n\n"
                 + "| 列 | 值 |\n| --- | --- |\n| a | 1 |\n\n---\n";
-        Files.write(md, source.getBytes("UTF-8"));
+        StringBuilder longDocument = new StringBuilder(source);
+        for (int i = 0; i < 80; i++) longDocument.append("\n## 节 ").append(i).append("\n\n段落\n");
+        Files.write(md, longDocument.toString().getBytes("UTF-8"));
         invokeMenu("文件", "打开…"); choose(md);
         waitFor(() -> edt(() -> window.getTitle().startsWith("说明.md") && window.area.isEditable()));
         edt(() -> {
@@ -327,6 +359,22 @@ public final class GuiTest {
             eq(2, window.model.getSelectionStart()); eq(4, window.model.getSelectionEnd());
             eq(text, window.model.getText());
             check(!window.model.isModified());
+            return null;
+        });
+        edt(() -> { key("control E"); return null; });
+        robot.waitForIdle();
+        edt(() -> {
+            JScrollPane sourceScroll = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, window.area);
+            JScrollPane renderedScroll = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, window.preview.pane());
+            sourceScroll.getVerticalScrollBar().setValue(500);
+            check(renderedScroll.getVerticalScrollBar().getValue() > 0);
+            renderedScroll.getVerticalScrollBar().setValue(1100);
+            check(sourceScroll.getVerticalScrollBar().getValue() > 500);
+            int block = window.preview.document().headings().get(5);
+            window.preview.pane().setCaretPosition(window.preview.renderedStart(block));
+            ((JMenuItem) window.preview.pane().getComponentPopupMenu().getComponent(0)).doClick();
+            eq(window.preview.document().start(block), window.area.getCaretPosition());
+            key("control E");
             return null;
         });
         JMenu languages = (JMenu) menu("视图", "语言");

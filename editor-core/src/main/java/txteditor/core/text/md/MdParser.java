@@ -149,14 +149,18 @@ public final class MdParser {
 
     private static int code(String text, LineIndex lines, int i, int n, int p, int e, List<Block> blocks) {
         char mark = text.charAt(p);
-        String info = text.substring(Math.min(e, p + fence(text, p, e)), e).trim();
+        int width = fence(text, p, e);
+        String info = text.substring(p + width, e).trim();
         Block block = new Block(MdDocument.CODE, lines.start(i), text.length(), Math.min(text.length(), stop(text, e)));
         if (!info.isEmpty()) block.language = info.split("\\s+")[0];
         int j = i + 1;
         while (j < n) {
             int js = lines.start(j), je = lines.end(j);
             int jp = skip(text, js, je);
-            if (jp < je && fence(text, jp, je) >= 3 && text.charAt(jp) == mark) break;
+            if (jp < je && text.charAt(jp) == mark) {
+                int close = fence(text, jp, je);
+                if (close >= width && skip(text, jp + close, je) == je) break;
+            }
             j++;
         }
         block.end = j < n ? Math.min(text.length(), stop(text, lines.end(j))) : text.length();
