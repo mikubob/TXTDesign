@@ -111,6 +111,29 @@ public final class EditorModel {
         return result < 0 && from > 0 ? Kmp.indexOf(buffer, pattern, 0) : result;
     }
 
+    /** 从选区开头往前找完整匹配，未找到时回绕到最后一处。 */
+    public int findPrevious(String pattern, int before) {
+        TextCodec.validateUnicode(pattern);
+        if (!isBoundary(before)) throw new IllegalArgumentException("查找起点不在字符边界");
+        return Kmp.previous(buffer, pattern, before);
+    }
+
+    /** 重叠的字面匹配分别计数。 */
+    public int countMatches(String pattern) {
+        TextCodec.validateUnicode(pattern);
+        return Kmp.count(buffer, pattern);
+    }
+
+    /** 行号从 1 开始，返回行首偏移，无此行返回 -1。 */
+    public int lineStart(int line) {
+        if (line < 1) return -1;
+        if (line == 1) return 0;
+        for (int i = 0; i < length(); i++) {
+            if (buffer.charAt(i) == '\n' && --line == 1) return i + 1;
+        }
+        return -1;
+    }
+
     public int getCodePointCount() { return Character.codePointCount(buffer, 0, length()); }
     public int getLineCount() {
         int lines = 1;

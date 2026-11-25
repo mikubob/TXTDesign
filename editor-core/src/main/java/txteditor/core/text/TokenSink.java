@@ -8,6 +8,9 @@ public final class TokenSink {
     private int[] spans = new int[3 * 32];
     private byte[] types = new byte[32];
     private int size;
+    private int from, to = Integer.MAX_VALUE;
+
+    void clip(int start, int end) { from = start; to = end; }
 
     public void clear() { size = 0; }
     public int size() { return size; }
@@ -16,6 +19,8 @@ public final class TokenSink {
     public byte type(int index) { return types[index]; }
 
     public void add(int start, int end, byte type) {
+        start = Math.max(start, from);
+        end = Math.min(end, to);
         if (start >= end) return;
         if (size == types.length) grow();
         int at = size * 3;

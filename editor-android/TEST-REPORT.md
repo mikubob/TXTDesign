@@ -1,5 +1,11 @@
 # 安卓 Material 3 改造验证记录
 
+## v1.7.0 回归（2026-11-25）
+
+- `powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Test` 通过。AdapterTest 7,632 项，包含新旧草稿和超过 32 MiB 草稿的往返。Lint 0 错误、10 警告，APK v2 签名验证通过。
+- `device-test.ps1 -Serial <测试模拟器> -TestInstance` 在独立 MuMu Android 15 模拟器通过。DeviceTests 主流程 84 项、重启恢复 5 项，包括测试 SAF 提供者外部修改后保留目标内容和显式确认覆盖。实体手机和人工输入法未测。
+
+
 日期：2026-10-28。以下为本次改造后实际执行结果，旧 UI 的测试记录不计入本次通过数。改动限定在 editor-android/；共享核心按源码引用，未修改核心或 Windows 模块。
 
 ## 环境与安装包

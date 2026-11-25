@@ -9,6 +9,9 @@ import txteditor.core.text.LineIndex;
  * 不做 CommonMark 全集，只覆盖首版声明支持的子集，未知结构按段落处理。
  */
 public final class MdParser {
+    public static final int BLOCK_LIMIT = 200_000;
+    private static final int CONTAINER_LIMIT = 32;
+
     private static final class Block {
         final byte type;
         final int start;
@@ -16,7 +19,7 @@ public final class MdParser {
         int content;
         int contentStop = -1;
         byte level, quote;
-        String language;
+        String language, listPrefix;
         boolean checked;
 
         Block(byte type, int start, int end, int content) {
@@ -38,6 +41,7 @@ public final class MdParser {
             int s = lines.start(i), e = lines.end(i);
             int p = skip(text, s, e);
             if (p >= e) { i++; continue; }
+            if (blocks.size() == BLOCK_LIMIT) return plain(text, lines);
             if (fence(text, p, e) >= 3) { i = code(text, lines, i, n, p, e, blocks); continue; }
             char c = text.charAt(p);
             if (c == '#') {
@@ -53,20 +57,35 @@ public final class MdParser {
             if (c == '>') {
                 int depth = 0, q = p;
                 while (q < e && text.charAt(q) == '>') { depth++; q++; }
-                Block block = new Block(MdDocument.QUOTE, s, stop(text, e), skip(text, q, e));
-                block.quote = (byte) depth;
-                blocks.add(block);
+                if (depth <= CONTAINER_LIMIT) {
+                    Block block = new Block(MdDocument.QUOTE, s, stop(text, e), skip(text, q, e));
+                    block.quote = (byte) depth;
+                    blocks.add(block);
+                    i++;
+                    continue;
+                }
+                blocks.add(new Block(MdDocument.LITERAL, s, stop(text, e), s));
                 i++;
                 continue;
             }
             int marker = listEnd(text, p, e);
+            int level = (p - s) / 2;
             if (marker > 0) {
+                if (level > CONTAINER_LIMIT) {
+                    blocks.add(new Block(MdDocument.LITERAL, s, stop(text, e), s));
+                    i++;
+                    continue;
+                }
                 Block block = new Block(MdDocument.LIST_ITEM, s, stop(text, e), marker);
-                block.level = (byte) ((p - s) / 2);
+                block.level = (byte) level;
+                int separator = p;
+                while (separator < marker && Character.isDigit(text.charAt(separator))) separator++;
+                block.listPrefix = separator == p ? "• " : text.substring(p, separator + 1) + " ";
                 if (marker + 2 < e && text.charAt(marker) == '[' && text.charAt(marker + 2) == ']'
                         && (text.charAt(marker + 1) == ' ' || text.charAt(marker + 1) == 'x'
                         || text.charAt(marker + 1) == 'X')) {
                     block.checked = text.charAt(marker + 1) != ' ';
+                    block.listPrefix = block.checked ? "☑ " : "☐ ";
                     block.content = skip(text, marker + 3, e);
                 }
                 blocks.add(block);
@@ -92,14 +111,25 @@ public final class MdParser {
             blocks.add(new Block(MdDocument.PARAGRAPH, s, stop(text, lines.end(j - 1)), s));
             i = j;
         }
-        return freeze(text, blocks);
+        return freeze(text, blocks, false);
     }
 
-    private static MdDocument freeze(String text, List<Block> blocks) {
+    /** 降级后保留原文，每一组行独立呈现，避免移动端一次排版全文。 */
+    private static MdDocument plain(String text, LineIndex lines) {
+        List<Block> blocks = new ArrayList<Block>();
+        for (int i = 0; i < lines.count(); i += 32) {
+            int start = lines.start(i);
+            int end = lines.end(Math.min(i + 31, lines.count() - 1));
+            blocks.add(new Block(MdDocument.PARAGRAPH, start, end, start));
+        }
+        return freeze(text, blocks, true);
+    }
+
+    private static MdDocument freeze(String text, List<Block> blocks, boolean plain) {
         int size = blocks.size();
         byte[] type = new byte[size], level = new byte[size], quote = new byte[size];
         int[] start = new int[size], end = new int[size], content = new int[size], contentStop = new int[size];
-        String[] language = new String[size];
+        String[] language = new String[size], listPrefix = new String[size];
         boolean[] checked = new boolean[size];
         for (int k = 0; k < size; k++) {
             Block b = blocks.get(k);
@@ -111,9 +141,10 @@ public final class MdParser {
             level[k] = b.level;
             quote[k] = b.quote;
             language[k] = b.language;
+            listPrefix[k] = b.listPrefix;
             checked[k] = b.checked;
         }
-        return new MdDocument(text, type, start, end, content, contentStop, level, quote, language, checked);
+        return new MdDocument(text, type, start, end, content, contentStop, level, quote, language, listPrefix, checked, plain);
     }
 
     private static int code(String text, LineIndex lines, int i, int n, int p, int e, List<Block> blocks) {

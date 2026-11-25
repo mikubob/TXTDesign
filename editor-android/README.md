@@ -16,7 +16,7 @@ powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Test
 
 首次构建需联网下载 Wrapper 与 Maven 依赖；SDK Manager 安装 Android SDK Platform 35 和 Build Tools 36.0.0。脚本也接受 `-Sdk 'SDK目录'`，默认依次读取 ANDROID_HOME、ANDROID_SDK_ROOT、LOCALAPPDATA/Android/Sdk。脚本生成本机 `local.properties`；它不纳入版本管理。
 
-产物：**build/txteditor-android.apk**（脚本便捷副本）；Gradle 原始产物位于 `build/outputs/apk/release/SimpleText-release.apk`。发布变体启用 R8 混淆与资源裁剪并沿用调试证书签名，体积约为调试包的四分之一。`-Test` 执行真实编译、7,629 项 JVM 适配检查、Android Lint 和 APK 签名校验。依赖下载完成后，可在本模块运行：
+产物：**build/txteditor-android.apk**（脚本便捷副本）；Gradle 原始产物位于 `build/outputs/apk/release/SimpleText-release.apk`。发布变体启用 R8 混淆与资源裁剪并沿用调试证书签名，体积约为调试包的四分之一。`-Test` 执行真实编译、JVM 适配检查、Android Lint 和 APK 签名校验。依赖下载完成后，可在本模块运行：
 
 ```powershell
 .\gradlew.bat --offline assembleRelease adapterCheck lintDebug
@@ -38,7 +38,7 @@ powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Install -Se
 - 「最近打开」子菜单按打开时间倒序列出最近 8 个文档（同一 URI 只留最新一条），点一下即可续开；授权失效时提示重新选择。记录写在应用私有目录 `recent.bin`。
 - Markdown 文档可在工具栏切换源码 / 实时预览：预览与编辑区同屏（竖屏上下、横屏左右），停止输入约 0.2 秒后自动重排，源码仍可继续编辑。
 - 撤销、重做使用紧凑图标按钮，48 dp 点击区域、文字无障碍说明和长按提示。禁用状态会变淡。Ctrl+Z、Ctrl+Shift+Z、Ctrl+Y 仍进入同一共享核心，保留最近 100 条历史。
-- 查找可展开、关闭；替换单独展开。Material 输入框支持清空，键盘“搜索”执行下一处，“完成”执行单次替换。按字面区分大小写，KMP 从选区末尾查找、末尾最多回绕一次；替换词留空表示删除。当前选区不是匹配时先查找再替换。
+- 查找可展开、关闭；替换单独展开。Material 输入框支持清空，键盘“搜索”执行下一处，“完成”执行单次替换。按字面区分大小写。下一处从选区末尾查找，上一处查找选区开头之前的完整命中，两个方向都支持回绕。面板显示匹配总数，替换词留空表示删除。当前选区不是匹配时先查找再替换。「更多文件操作」里的「跳转到行」将光标移到输入行号的行首。
 - 明暗主题跟随系统；蓝色强调、统一圆角和间距，正文使用易读的无衬线字体及额外行距。
 - 横屏查找与正文左右分栏；可用高度很小时收起副标题、统计与第二行操作，把撤销/重做/查找保留在更多菜单。可用高度不足 160 dp 时暂时隐藏工具栏，收起键盘后恢复。搜索区可滚动，键盘、系统栏及刘海区域通过 WindowInsetsCompat 处理。
 - 返回先收起查找面板，再执行原来的未保存离开保护。新建、打开、关闭及返回可保存、放弃或取消；保存失败、取消文件选择均不执行后续离开操作。
@@ -48,13 +48,13 @@ powershell -ExecutionPolicy Bypass -File .\editor-android\build.ps1 -Install -Se
 
 SAF 的 ACTION_OPEN_DOCUMENT / ACTION_CREATE_DOCUMENT 通过 ContentResolver 访问 URI，不转换文件路径，不申请存储或联网权限；提供者允许时保留持久化授权。URI 失效、文档移动或读取失败仍保留当前文本。
 
-共享 TextCodec 严格解码 UTF-8，接受首 BOM，将 CRLF/CR 转 LF，保存不添加 BOM。非法 UTF-8 拒绝打开。首版打开上限 16 MiB；完整文本镜像与统计仍有 O(N) 成本。
+共享 TextCodec 严格解码 UTF-8，接受首 BOM，将 CRLF/CR 转 LF，保存不添加 BOM。非法 UTF-8 拒绝打开。文件打开和保存的上限为 16 MiB，按 UTF-8 字节计。超过保存上限时保留编辑内容与私有草稿。完整文本镜像与统计仍有 O(N) 成本。
 
-覆盖 URI 前，先用 AtomicFile 落盘应用私有 recovery.bin；备份失败就不覆盖。提供者写入或关闭失败时，保留文本、原 URI、修改状态和恢复副本，Material 对话框提供“另存为”。成功后才更新保存基准并清理恢复副本。SAF 提供者不保证原子覆盖，失败后原目标可能部分写入，恢复副本用于保护编辑内容。
+保存回原 URI 前比较打开时或上次成功保存时的 SHA-256。原文件已变化、无法重读或旧草稿缺少校验值时，先询问覆盖、另存为或取消。真正写入前用 AtomicFile 落盘应用私有 recovery.bin，备份失败就停止。提供者写入或关闭失败时，保留文本、原 URI、修改状态和恢复副本，Material 对话框提供“另存为”。成功后才更新保存基准并清理恢复副本。SAF 提供者不保证原子覆盖，失败后原目标可能部分写入，恢复副本用于保护编辑内容。
 
 AppCompatActivity 通过自身 ViewModelStore / ViewModelProvider 管理唯一 EditorViewModel，不再手工保留 Store。旋转保留同一核心对象、选区、历史、查找字段及滚动位置；I/O 在单线程执行器进行，核心只在主线程访问。
 
-编辑空闲 700 ms 和退到后台时写 draft.bin，包含文本、最近保存快照、URI、选区与查找状态。重启选择较新的草稿或覆盖前恢复副本；进程重建后历史重新开始，旋转保留历史。明确放弃后新建/关闭替换旧草稿。断电或草稿写入前强杀，仍可能丢失最后不到 700 ms 的输入。
+编辑空闲 700 ms 和退到后台时写 draft.bin，包含文本、最近保存快照、URI、内容校验值、选区与查找状态。版本 1 和 2 的草稿仍能读取。重启选择较新的草稿或覆盖前恢复副本；进程重建后历史重新开始，旋转保留历史。明确放弃后新建/关闭替换旧草稿。断电或草稿写入前强杀，仍可能丢失最后不到 700 ms 的输入。
 
 CoreEditText 保留输入法组合区、代理项边界和核心同步适配，仅将控件基类接入 AppCompatEditText。候选提交后以一次最小区间替换送入核心；保存、后台与旋转前提交组合。不逐字 setText，不启用第二套原生撤销；程序回写抑制监听。UTF-16 选区吸附完整代理项边界，半个代理项删除会删除整个表情；完整字素簇处理不在本期范围。
 

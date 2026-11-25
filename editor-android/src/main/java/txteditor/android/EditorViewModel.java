@@ -14,6 +14,9 @@ import java.io.InputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.CharacterCodingException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -39,6 +42,8 @@ final class EditorViewModel extends ViewModel {
     LanguageId language = LanguageId.PLAIN;
     int viewMode = SOURCE;
     String name = LanguageId.PLAIN.defaultFileName(), uri = "", saved = "", pattern = "", replacement = "", message = "";
+    String conflictUri = "";
+    private String fingerprint = "";
     int scroll, afterSave, readyAction, documentVersion, textVersion;
     private final Runnable delayedDraft = this::persist;
 
@@ -68,7 +73,7 @@ final class EditorViewModel extends ViewModel {
                     core.load(draft.text); core.markSaved(draft.savedText); saved = draft.savedText;
                     core.setSelection(TextEdits.boundary(draft.text, draft.selectionStart, false),
                             TextEdits.boundary(draft.text, Math.max(draft.selectionStart, draft.selectionEnd), true));
-                    uri = restored.uri; name = draft.fileName; pattern = draft.pattern;
+                    uri = restored.uri; fingerprint = restored.fingerprint; name = draft.fileName; pattern = draft.pattern;
                     replacement = draft.replacement; search = draft.searchOpen; scroll = draft.scroll;
                     language = LanguageId.parse(draft.language);
                     viewMode = language == LanguageId.MARKDOWN && draft.viewMode == PREVIEW ? PREVIEW : SOURCE;
@@ -89,11 +94,16 @@ final class EditorViewModel extends ViewModel {
     /** 每次正文变化都记一笔，实时预览靠它判断要不要重排。 */
     void edited() { textVersion++; main.removeCallbacks(delayedDraft); main.postDelayed(delayedDraft, 700); }
 
-    void persist() {
+    void persist() { persist(false); }
+
+    private void persist(boolean clearRecovery) {
         main.removeCallbacks(delayedDraft);
-        SessionSnapshot draft = snapshot(); String target = uri;
+        SessionSnapshot draft = snapshot(); String target = uri, baseline = fingerprint;
         io.execute(() -> {
-            try { DraftStore.write(draftFile, draft, target); }
+            try {
+                DraftStore.write(draftFile, draft, target, baseline);
+                if (clearRecovery) DraftStore.delete(recoveryFile);
+            }
             catch (Exception error) { main.post(() -> { message = app.getString(R.string.draft_save_failed, detail(error)); notifyChange(); }); }
         });
     }
@@ -101,7 +111,7 @@ final class EditorViewModel extends ViewModel {
     /** 类型决定默认后缀与高亮语言，草稿随新建一起写入。 */
     void newDocument(LanguageId type) {
         language = type;
-        core.load(""); saved = ""; uri = ""; name = type.defaultFileName(); scroll = 0; viewMode = SOURCE;
+        core.load(""); saved = ""; uri = ""; fingerprint = ""; name = type.defaultFileName(); scroll = 0; viewMode = SOURCE;
         documentVersion++; textVersion++; persist(); notifyChange();
     }
 
@@ -113,24 +123,26 @@ final class EditorViewModel extends ViewModel {
         io.execute(() -> {
             try {
                 String text;
+                MessageDigest checksum = sha256();
                 try (InputStream in = app.getContentResolver().openInputStream(target)) {
                     if (in == null) throw new IOException(app.getString(R.string.cannot_read_file));
                     ByteArrayOutputStream bytes = new ByteArrayOutputStream();
                     byte[] buffer = new byte[8192]; int count;
                     while ((count = in.read(buffer)) != -1) {
-                        // shortcut: 首版针对小文本，超过 16 MiB 时需分页或流式编辑器。
-                        if (bytes.size() + count > 16 * 1024 * 1024)
+                        if (bytes.size() + count > TextCodec.FILE_LIMIT_BYTES)
                             throw new TooLarge(TextKeys.of(TextKeys.TOO_LARGE_REFUSED, "16 MiB"));
                         bytes.write(buffer, 0, count);
+                        checksum.update(buffer, 0, count);
                     }
                     text = TextCodec.decodeUtf8(bytes.toByteArray());
                 }
+                String baseline = encodeFingerprint(checksum.digest());
                 String filename = displayName(target);
                 // 后缀优先，MIME 与首行兜底：SAF 对 .java/.c 常报 application/octet-stream。
                 LanguageId detected = LanguageId.detect(filename, mime(target), text);
                 RecentFiles.add(recentFile, target.toString(), filename);
                 main.post(() -> {
-                    core.load(text); saved = text; uri = target.toString(); name = filename; scroll = 0;
+                    core.load(text); saved = text; uri = target.toString(); fingerprint = baseline; name = filename; scroll = 0;
                     language = detected; viewMode = SOURCE;
                     documentVersion++; textVersion++; busy = false; message = app.getString(R.string.opened_utf8); persist(); notifyChange();
                 });
@@ -155,39 +167,79 @@ final class EditorViewModel extends ViewModel {
         });
     }
 
-    void save(Uri target) {
-        SessionSnapshot draft = snapshot(); String previous = uri;
+    void save(Uri target) { save(target, false); }
+
+    void save(Uri target, boolean overwrite) {
+        SessionSnapshot draft = snapshot();
+        String previous = uri, baseline = fingerprint;
         busy = true; notifyChange();
         io.execute(() -> {
             try {
+                if (TextCodec.exceedsUtf8Limit(draft.text, TextCodec.FILE_LIMIT_BYTES)) {
+                    main.post(() -> saveError(TextKeys.TOO_LARGE_TO_SAVE));
+                    return;
+                }
+                if (!overwrite && target.toString().equals(previous) && !matchesBaseline(target, baseline)) {
+                    main.post(() -> { busy = false; conflictUri = target.toString(); notifyChange(); });
+                    return;
+                }
                 // 写 URI 前必须先可靠落盘；提供者截断后失败时仍可恢复。
-                DraftStore.write(recoveryFile, draft, previous);
+                DraftStore.write(recoveryFile, draft, previous, baseline);
                 byte[] bytes = TextCodec.encodeUtf8(draft.text);
                 ContentResolver resolver = app.getContentResolver();
                 try (OutputStream out = resolver.openOutputStream(target, "wt")) {
                     if (out == null) throw new IOException(app.getString(R.string.no_output_stream));
                     out.write(bytes); out.flush();
                 }
-                String filename = displayName(target);
+                String filename = target.toString().equals(previous) ? draft.fileName : displayName(target);
+                String written = encodeFingerprint(sha256().digest(bytes));
                 RecentFiles.add(recentFile, target.toString(), filename);
                 main.post(() -> {
                     core.markSaved(draft.text); saved = draft.text; uri = target.toString(); name = filename;
-                    // 另存为可能改后缀：认出新语言，没后缀时保留原语言。
-                    LanguageId byName = LanguageId.forFileName(filename);
-                    if (byName != LanguageId.PLAIN) language = byName;
+                    fingerprint = written;
+                    if (!uri.equals(previous)) {
+                        language = LanguageId.forFileName(filename);
+                        if (language != LanguageId.MARKDOWN) viewMode = SOURCE;
+                    }
                     busy = false; message = app.getString(R.string.saved_utf8);
                     readyAction = afterSave; afterSave = NONE;
-                    persist(); io.execute(() -> DraftStore.delete(recoveryFile)); notifyChange();
+                    persist(true); notifyChange();
                 });
             } catch (Exception error) {
-                main.post(() -> {
-                    busy = false; afterSave = NONE; saveFailed = true;
-                    message = TextKeys.of(TextKeys.SAVE_FAILED);
-                    persist(); notifyChange();
-                });
+                main.post(() -> saveError(TextKeys.of(TextKeys.SAVE_FAILED) + "\n" + detail(error)));
             }
         });
     }
+
+    private void saveError(String detail) {
+        busy = false; afterSave = NONE; saveFailed = true; message = detail;
+        persist(); notifyChange();
+    }
+
+    private boolean matchesBaseline(Uri target, String baseline) {
+        if (baseline.isEmpty()) return false;
+        try (InputStream in = app.getContentResolver().openInputStream(target)) {
+            if (in == null) return false;
+            MessageDigest checksum = sha256();
+            byte[] buffer = new byte[8192];
+            int size = 0, count;
+            while ((count = in.read(buffer)) != -1) {
+                size += count;
+                if (size > TextCodec.FILE_LIMIT_BYTES) return false;
+                checksum.update(buffer, 0, count);
+            }
+            return baseline.equals(encodeFingerprint(checksum.digest()));
+        } catch (IOException | SecurityException unavailable) {
+            return false;
+        }
+    }
+
+    private static MessageDigest sha256() {
+        try { return MessageDigest.getInstance("SHA-256"); }
+        catch (NoSuchAlgorithmException unavailable) { throw new IllegalStateException(unavailable); }
+    }
+
+    private static String encodeFingerprint(byte[] digest) { return Base64.getEncoder().encodeToString(digest); }
 
     private String mime(Uri target) {
         try { return app.getContentResolver().getType(target); }

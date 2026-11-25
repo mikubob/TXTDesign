@@ -219,6 +219,21 @@ public final class DeviceTests extends Instrumentation {
             equal(snapshot[0], TextCodec.decodeUtf8(bytes.toByteArray()));
             equal(false, bytes.toByteArray()[0] == (byte) 0xEF);
         }
+        Uri savedUri = Uri.parse("content://txteditor.android.tests.docs/saved");
+        android.content.ContentResolver resolver = getTargetContext().getContentResolver();
+        try (java.io.OutputStream out = resolver.openOutputStream(savedUri, "wt")) {
+            out.write("external".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        Runnable observer = state.observer;
+        ui(() -> { state.observer = null; state.save(savedUri); }); ready();
+        try (InputStream in = resolver.openInputStream(savedUri)) { equal((int) 'e', in.read()); }
+        ui(() -> {
+            equal(savedUri.toString(), state.conflictUri);
+            state.conflictUri = "";
+            state.observer = observer;
+            state.save(savedUri, true);
+        }); ready();
+        ui(() -> equal(snapshot[0], state.core.getText()));
         ui(() -> { editor.getText().append("失败"); });
         ui(() -> state.save(Uri.parse("content://txteditor.android.tests.docs/fail"))); ready();
         ui(() -> {

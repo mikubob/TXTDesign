@@ -69,7 +69,7 @@ public final class EditorWindow extends JFrame {
     private final JSplitPane split;
     private final List<Action> actions = new ArrayList<Action>();
     private final List<JComponent> searchControls = new ArrayList<JComponent>();
-    private Action undoAction, redoAction, nextAction, replaceAction, zoomInAction, zoomOutAction, themeAction, previewAction;
+    private Action undoAction, redoAction, nextAction, previousAction, replaceAction, zoomInAction, zoomOutAction, themeAction, previewAction;
     private Action saveAction;
     private JToggleButton previewToggle;
     private JRadioButtonMenuItem themeSystem, themeLight, themeDark;
@@ -103,6 +103,7 @@ public final class EditorWindow extends JFrame {
         query.getAccessibleContext().setAccessibleName("查找词，区分大小写");
         replacement.getAccessibleContext().setAccessibleName("替换文本");
         binding = new EditorBinding(area, model, this::documentChanged, this::showError);
+        area.addPropertyChangeListener(SyntaxPainter.LIMITED, event -> updateState());
         JMenuBar menus = new JMenuBar();
         JMenu files = new JMenu("文件"); files.setMnemonic(KeyEvent.VK_F);
         // 新建先选类型：决定默认后缀与高亮语言，Ctrl+N 仍直接建纯文本。
@@ -128,6 +129,8 @@ public final class EditorWindow extends JFrame {
         JMenu searchMenu = new JMenu("查找");
         addAction(searchMenu, "查找…", "control F", () -> showSearch(false));
         nextAction = addAction(searchMenu, "下一处", "F3", this::find);
+        previousAction = addAction(searchMenu, TextKeys.PREVIOUS_MATCH, "shift F3", () -> find(true));
+        addAction(searchMenu, TextKeys.GO_TO_LINE + "…", "control G", this::goToLine);
         Action showReplace = addAction(searchMenu, "替换…", "control H", () -> showSearch(true));
         replaceAction = action("替换当前", null, this::replaceCurrent);
         Action closeSearch = action("关闭查找", "ESCAPE", this::closeSearch);
@@ -216,6 +219,7 @@ public final class EditorWindow extends JFrame {
         replacement.putClientProperty("JTextField.placeholderText", "输入替换内容（可留空）");
         findRow.add(query, BorderLayout.CENTER);
         JPanel findButtons = surface(new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0)));
+        findButtons.add(button(previousAction, null, false));
         findButtons.add(button(nextAction, null, false)); findButtons.add(button(closeSearch, CLOSE, true));
         findRow.add(findButtons, BorderLayout.EAST);
         surface(replaceRow); JLabel replaceLabel = new JLabel("替换"); replaceLabel.setLabelFor(replacement);
@@ -437,6 +441,7 @@ public final class EditorWindow extends JFrame {
     private void searchChanged() {
         searchResult.setText("区分大小写 · 按字面查找 · 末尾自动回绕");
         nextAction.setEnabled(!busy && !query.getText().isEmpty());
+        previousAction.setEnabled(nextAction.isEnabled());
         replaceAction.setEnabled(!busy && !readOnly && !query.getText().isEmpty());
     }
 
@@ -527,17 +532,34 @@ public final class EditorWindow extends JFrame {
         return focused instanceof JTextComponent ? (JTextComponent) focused : area;
     }
 
-    void find() {
+    void find() { find(false); }
+
+    void find(boolean previous) {
         if (busy) return;
         binding.finishInput();
         if (query.getText().isEmpty()) { showSearch(false); searchResult.setText("请输入查找内容"); return; }
         try {
-            int hit = model.findNext(query.getText(), model.getSelectionEnd());
+            String pattern = query.getText();
+            int hit = previous ? model.findPrevious(pattern, model.getSelectionStart())
+                    : model.findNext(pattern, model.getSelectionEnd());
             if (hit < 0) { showSearch(false); searchResult.setText(TextKeys.of(TextKeys.NOT_FOUND, query.getText())); return; }
             model.setSelection(hit, hit + query.getText().length()); binding.syncSelection(); area.requestFocusInWindow();
-            searchResult.setText("已找到匹配 · F3 查找下一处");
+            searchResult.setText(TextKeys.of(TextKeys.MATCH_COUNT, model.countMatches(pattern)));
             updateState();
         } catch (IllegalArgumentException invalid) { showError(invalid.getMessage()); }
+    }
+
+    private void goToLine() {
+        if (busy) return;
+        binding.finishInput();
+        String hint = TextKeys.of(TextKeys.LINE_RANGE, model.getLineCount());
+        String value = JOptionPane.showInputDialog(this, hint, TextKeys.GO_TO_LINE, JOptionPane.QUESTION_MESSAGE);
+        if (value == null) return;
+        int offset = -1;
+        try { offset = model.lineStart(Integer.parseInt(value.trim())); }
+        catch (NumberFormatException invalid) { /* 与越界行号使用同一范围提示。 */ }
+        if (offset < 0) { showError(hint); return; }
+        model.setSelection(offset, offset); binding.syncSelection(); area.requestFocusInWindow();
     }
 
     void replaceCurrent() {
@@ -676,15 +698,20 @@ public final class EditorWindow extends JFrame {
             protected Void doInBackground() throws Exception { SafeFiles.write(chosen, snapshot); return null; }
             protected void done() {
                 boolean success = false;
+                String failure = null;
                 try {
-                    get(); file = chosen; readOnly = false;
+                    get();
+                    boolean renamed = file == null || !chosen.equals(file);
+                    file = chosen; readOnly = false;
                     fileModified = EditorStore.modifiedTime(chosen); fileSize = EditorStore.size(chosen);
                     model.markSaved(snapshot); EditorStore.clearSession(); addRecent(chosen); success = true;
-                    adoptLanguage(LanguageId.forFileName(chosen.getFileName() == null ? null : chosen.getFileName().toString()));
-                } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); showError("保存被中断；请检查目标文件后再次保存。"); }
-                catch (ExecutionException failed) { saveFailed(fileError(failed.getCause())); }
+                    if (renamed) adoptLanguage(LanguageId.forFileName(chosen.getFileName() == null ? null : chosen.getFileName().toString()));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt(); failure = "保存被中断；请检查目标文件后再次保存。";
+                } catch (ExecutionException failed) { failure = fileError(failed.getCause()); }
                 finally { setBusy(false); }
                 if (success) afterSuccess.run();
+                else if (failure != null) saveFailed(failure);
             }
         }.execute();
     }
@@ -861,7 +888,8 @@ public final class EditorWindow extends JFrame {
         savedState.setToolTipText(readOnly ? TextKeys.of(TextKeys.TOO_LARGE_PARTIAL, "16 MiB") : null);
         status.setText((restored ? "已恢复上次会话  |  " : "") + (busy ? "文件处理中…  " : "")
                 + model.getCodePointCount() + " 个码点  |  " + model.getLineCount() + " 行  |  "
-                + language.title + "  |  UTF-8 / LF");
+                + language.title + "  |  UTF-8 / LF"
+                + (Boolean.TRUE.equals(area.getClientProperty(SyntaxPainter.LIMITED)) ? "  |  " + TextKeys.STYLING_TOO_LARGE : ""));
         try {
             int caret = area.getCaretPosition();
             Element root = area.getDocument().getDefaultRootElement();
@@ -876,6 +904,7 @@ public final class EditorWindow extends JFrame {
         for (JRadioButtonMenuItem item : languageItems.values()) item.setEnabled(!busy);
         if (nextAction != null) {
             nextAction.setEnabled(!busy && !query.getText().isEmpty());
+            previousAction.setEnabled(nextAction.isEnabled());
             replaceAction.setEnabled(!busy && !readOnly && !query.getText().isEmpty());
             zoomInAction.setEnabled(!busy && zoom < 200); zoomOutAction.setEnabled(!busy && zoom > 70);
         }

@@ -119,8 +119,9 @@ public final class AdapterTest {
         SessionSnapshot snapshot = new SessionSnapshot("中😀\n", "以前", "草稿.md", 1, 3, 7, "中", "换", true,
                 "MARKDOWN", 1);
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        DraftFormat.write(new DataOutputStream(bytes), snapshot, "content://example/doc/1");
+        DraftFormat.write(new DataOutputStream(bytes), snapshot, "content://example/doc/1", "stored-fingerprint");
         DraftFormat.Decoded read = DraftFormat.read(new DataInputStream(new ByteArrayInputStream(bytes.toByteArray())));
+        equal("stored-fingerprint", read.fingerprint);
         equal(snapshot.text, read.snapshot.text); equal(snapshot.savedText, read.snapshot.savedText);
         equal("content://example/doc/1", read.uri); equal(snapshot.fileName, read.snapshot.fileName);
         equal(1, read.snapshot.selectionStart); equal(3, read.snapshot.selectionEnd); equal(7, read.snapshot.scroll);
@@ -134,6 +135,7 @@ public final class AdapterTest {
         writeString(old, "旧.md"); writeString(old, ""); writeString(old, "");
         old.writeInt(1); old.writeInt(2); old.writeInt(3); old.writeBoolean(false);
         DraftFormat.Decoded restored = DraftFormat.read(new DataInputStream(new ByteArrayInputStream(legacy.toByteArray())));
+        equal("", restored.fingerprint);
         equal("旧😀", restored.snapshot.text); equal("旧.md", restored.snapshot.fileName);
         equal(1, restored.snapshot.selectionStart); equal(2, restored.snapshot.selectionEnd); equal(3, restored.snapshot.scroll);
         equal("PLAIN", restored.snapshot.language); equal(0, restored.snapshot.viewMode);
@@ -144,6 +146,19 @@ public final class AdapterTest {
         equal(0, DraftFormat.read(new DataInputStream(new ByteArrayInputStream(oddBytes.toByteArray()))).snapshot.viewMode);
         try { DraftFormat.read(new DataInputStream(new ByteArrayInputStream(new byte[]{0, 0, 0, 3}))); throw new AssertionError(); }
         catch (IOException expected) { checks++; }
+        File largeDraft = File.createTempFile("large-draft", ".bin");
+        try {
+            int length = 32 * 1024 * 1024 + 1;
+            char[] chars = new char[length];
+            java.util.Arrays.fill(chars, 'a');
+            SessionSnapshot large = new SessionSnapshot(new String(chars), "", "大.txt", 0, 0, 0, "", "", false);
+            try (DataOutputStream out = new DataOutputStream(new java.io.FileOutputStream(largeDraft))) {
+                DraftFormat.write(out, large, "");
+            }
+            try (DataInputStream in = new DataInputStream(new java.io.FileInputStream(largeDraft))) {
+                equal(large.text, DraftFormat.read(in).snapshot.text);
+            }
+        } finally { java.nio.file.Files.deleteIfExists(largeDraft.toPath()); }
         // A4：最近打开按时间倒序、同一 URI 去重、超出上限丢最旧的，损坏文件当空列表。
         File recent = File.createTempFile("recent", ".bin");
         try {

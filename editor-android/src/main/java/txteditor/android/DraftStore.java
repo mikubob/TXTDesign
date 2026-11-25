@@ -12,12 +12,16 @@ final class DraftStore {
     private DraftStore() { }
 
     static void write(File file, SessionSnapshot snapshot, String uri) throws IOException {
+        write(file, snapshot, uri, "");
+    }
+
+    static void write(File file, SessionSnapshot snapshot, String uri, String fingerprint) throws IOException {
         AtomicFile atomic = new AtomicFile(file);
         FileOutputStream stream = null;
         try {
             stream = atomic.startWrite();
             DataOutputStream out = new DataOutputStream(stream);
-            DraftFormat.write(out, snapshot, uri); out.flush(); atomic.finishWrite(stream);
+            DraftFormat.write(out, snapshot, uri, fingerprint); out.flush(); atomic.finishWrite(stream);
         } catch (IOException | RuntimeException error) {
             if (stream != null) atomic.failWrite(stream);
             throw error;

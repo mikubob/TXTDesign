@@ -38,7 +38,7 @@ public final class CoreTest {
         try { TextCodec.decodeUtf8(new byte[] {(byte)0xc3, 0x28}); throw new AssertionError("bad UTF-8 accepted"); }
         catch (CharacterCodingException expected) { checks++; }
         textKeys();
-        randomEdits(); randomKmp(); transactions();
+        randomEdits(); randomKmp(); transactions(); navigation();
         System.out.println("CoreTest PASS: " + checks + " checks");
     }
 
@@ -126,6 +126,22 @@ public final class CoreTest {
                 check(model.redo()); eq(reference.toString(), model.getText());
             }
         }
+    }
+
+    private static void navigation() {
+        EditorModel model = new EditorModel();
+        model.load("aaa\n😀\n");
+        eq(2, model.countMatches("aa"));
+        eq(1, model.findPrevious("aa", 0));
+        eq(0, model.findPrevious("aa", 2));
+        eq(-1, model.findPrevious("不存在", 3));
+        eq(0, model.getSelectionStart());
+        eq(4, model.lineStart(2));
+        eq(7, model.lineStart(3));
+        eq(-1, model.lineStart(4));
+        check(!model.canUndo());
+        check(!TextCodec.exceedsUtf8Limit("中😀", 7));
+        check(TextCodec.exceedsUtf8Limit("中😀", 6));
     }
 
     private static void randomKmp() {

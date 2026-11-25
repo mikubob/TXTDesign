@@ -10,6 +10,22 @@ import java.nio.charset.StandardCharsets;
 public final class TextCodec {
     private TextCodec() { }
 
+    public static final int FILE_LIMIT_BYTES = 16 * 1024 * 1024;
+    public static final int STYLING_LIMIT_BYTES = 2 * 1024 * 1024;
+
+    /** 用于已验证且换行已统一的编辑快照，超过预算即停止扫描。 */
+    public static boolean exceedsUtf8Limit(CharSequence text, int limit) {
+        if (text.length() > limit) return true;
+        int bytes = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (Character.isHighSurrogate(ch)) { bytes += 4; i++; }
+            else bytes += ch <= 0x7f ? 1 : ch <= 0x7ff ? 2 : 3;
+            if (bytes > limit) return true;
+        }
+        return false;
+    }
+
     public static String normalize(String text) {
         validateUnicode(text);
         return text.replace("\r\n", "\n").replace('\r', '\n');

@@ -31,18 +31,14 @@ $tests = @(Get-ChildItem -LiteralPath "$build\outputs\apk\androidTest\debug" -Fi
 if ($tests.Count -ne 1) { throw '未找到唯一的设备测试 APK。' }
 Copy-Item -LiteralPath $tests[0].FullName -Destination "$build\txteditor-tests.apk" -Force
 Remove-Item -LiteralPath "$build\txteditor-tests.apk.idsig" -ErrorAction SilentlyContinue
-# adb install 打印 Failure 时退出码仍是 0，必须看输出；换过签名（旧 debug 证书）的包要卸载后才能装。
-function Install([string]$apk, [string]$package) {
+# adb install 打印 Failure 时仍可能返回 0；签名冲突时停止并保留测试机数据。
+function Install([string]$apk) {
     $ErrorActionPreference = 'Continue'
     $out = (& $adb -s $Serial install -r $apk 2>&1 | Out-String)
-    if ($out -match 'INSTALL_FAILED_UPDATE_INCOMPATIBLE') {
-        $null = & $adb -s $Serial uninstall $package 2>&1
-        $out = (& $adb -s $Serial install -r $apk 2>&1 | Out-String)
-    }
     if ($out -notmatch 'Success') { throw "安装失败：$apk`n$out" }
 }
-Install $app[0].FullName 'txteditor.android'
-Install "$build\txteditor-tests.apk" 'txteditor.android.tests'
+Install $app[0].FullName
+Install "$build\txteditor-tests.apk"
 foreach ($restore in @('false', 'true')) {
     Run $adb @('-s', $Serial, 'shell', 'am', 'force-stop', 'txteditor.android')
     $ErrorActionPreference = 'Continue'

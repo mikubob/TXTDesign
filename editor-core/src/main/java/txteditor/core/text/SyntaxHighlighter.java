@@ -5,6 +5,7 @@ package txteditor.core.text;
  * token 不常驻，绘制时对可见行现算——省掉长文档每按键的整体平移与几万个小对象。
  */
 public final class SyntaxHighlighter {
+    public static final int LONG_LINE = 100_000;
     private final LineIndex lines = new LineIndex();
     private final TokenSink scratch = new TokenSink();
     private LanguageId language = LanguageId.PLAIN;
@@ -12,6 +13,8 @@ public final class SyntaxHighlighter {
     private byte[] states = new byte[16];
     private int count;
     private String text = "";
+
+    public SyntaxHighlighter() { scratch.clip(0, 0); }
 
     public LanguageId language() { return language; }
 
@@ -50,14 +53,32 @@ public final class SyntaxHighlighter {
      * 从该行缓存的行首状态起算，所以不需要重扫前面。
      */
     public void paint(int fromLine, int toLine, TokenSink out) {
+        paintVisible(fromLine, toLine, 0, text.length(), out);
+    }
+
+    /** 长行仍扫描以延续词法状态，只保留与可视区相交的 token。 */
+    public void paintVisible(int fromLine, int toLine, int visibleStart, int visibleEnd, TokenSink out) {
         out.clear();
         if (count == 0) return;
+        int start = boundary(visibleStart, false), end = boundary(visibleEnd, true);
         int from = Math.max(0, Math.min(fromLine, count - 1));
         int to = Math.max(from, Math.min(toLine, count - 1));
         byte state = states[from];
         for (int line = from; line <= to; line++) {
-            state = lexer.lexLine(text, lines.start(line), lines.end(line), state, out);
+            int lineStart = lines.start(line), lineEnd = lines.end(line);
+            if (lineEnd - lineStart > LONG_LINE) out.clip(start, end);
+            else out.clip(0, Integer.MAX_VALUE);
+            state = lexer.lexLine(text, lineStart, lineEnd, state, out);
         }
+        out.clip(0, Integer.MAX_VALUE);
+    }
+
+    private int boundary(int offset, boolean forward) {
+        int length = text.length();
+        offset = Math.max(0, Math.min(length, offset));
+        if (offset > 0 && offset < length && Character.isHighSurrogate(text.charAt(offset - 1))
+                && Character.isLowSurrogate(text.charAt(offset))) return offset + (forward ? 1 : -1);
+        return offset;
     }
 
     public int lineCount() { return count; }

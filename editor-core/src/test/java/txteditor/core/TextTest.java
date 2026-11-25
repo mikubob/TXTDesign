@@ -21,6 +21,7 @@ public final class TextTest {
         multiLineStates();
         incremental();
         markdown();
+        markdownLimits();
         System.out.println("TextTest " + checks + " checks passed");
     }
 
@@ -167,6 +168,39 @@ public final class TextTest {
                 eq(dump(highlighter), full(buffer.toString(), language));
             }
         }
+    }
+
+    private static void markdownLimits() {
+        MdDocument lists = MdParser.parse("7. first\n  8) second\n- [ ] pending\n- [x] done");
+        eq("7. ", lists.listPrefix(0));
+        eq("8) ", lists.listPrefix(1));
+        eq("☐ ", lists.listPrefix(2));
+        eq("☑ ", lists.listPrefix(3));
+        String quoted = new String(new char[128]).replace('\0', '>') + " *text*";
+        MdDocument quote = MdParser.parse(quoted);
+        eq(MdDocument.LITERAL, quote.type(0));
+        eq(0, quote.inline(0).length);
+        eq(quoted, quote.source(0));
+
+        StringBuilder many = new StringBuilder();
+        for (int i = 0; i < MdParser.BLOCK_LIMIT; i++) many.append("# x\n");
+        check(!MdParser.parse(many.toString()).isPlain());
+        MdDocument fallback = MdParser.parse(many.append("# final\n").toString());
+        check(fallback.isPlain());
+        check(fallback.text().endsWith("# final\n"));
+
+        String longLine = "//" + new String(new char[120_000]).replace('\0', '[') + "😀x";
+        MdDocument paragraph = MdParser.parse(longLine);
+        eq(0, paragraph.inline(0).length);
+        SyntaxHighlighter highlighter = new SyntaxHighlighter();
+        highlighter.setLanguage(LanguageId.MARKDOWN);
+        highlighter.load(longLine);
+        highlighter.setLanguage(LanguageId.JAVA);
+        TokenSink clipped = new TokenSink();
+        highlighter.paintVisible(0, 0, longLine.length() - 2, longLine.length() - 1, clipped);
+        eq(1, clipped.size());
+        eq(longLine.length() - 3, clipped.start(0));
+        eq(longLine.length() - 1, clipped.end(0));
     }
 
     private static void markdown() {

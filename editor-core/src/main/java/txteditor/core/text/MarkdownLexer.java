@@ -55,7 +55,7 @@ final class MarkdownLexer implements Lexer {
     }
 
     private static void inline(CharSequence text, int from, int end, TokenSink out) {
-        int i = from;
+        int i = from, bracket = from - 1, paren = from - 1;
         while (i < end) {
             char c = text.charAt(i);
             if (c == '\\') { i += 2; continue; }
@@ -72,10 +72,10 @@ final class MarkdownLexer implements Lexer {
             }
             if (c == '[' || (c == '!' && i + 1 < end && text.charAt(i + 1) == '[')) {
                 int open = c == '!' ? i + 1 : i;
-                int bracket = find(text, open + 1, end, ']');
+                if (bracket <= open) bracket = find(text, open + 1, end, ']');
                 if (bracket > 0 && bracket + 1 < end && text.charAt(bracket + 1) == '(') {
-                    int close = find(text, bracket + 2, end, ')');
-                    if (close > 0) { out.add(i, close + 1, TokenType.LINK); i = close + 1; continue; }
+                    if (paren < bracket + 2) paren = find(text, bracket + 2, end, ')');
+                    if (paren < end) { out.add(i, paren + 1, TokenType.LINK); i = paren + 1; continue; }
                 }
             }
             i++;
@@ -122,6 +122,6 @@ final class MarkdownLexer implements Lexer {
 
     private static int find(CharSequence text, int from, int end, char c) {
         for (int i = from; i < end; i++) if (text.charAt(i) == c) return i;
-        return -1;
+        return end;
     }
 }

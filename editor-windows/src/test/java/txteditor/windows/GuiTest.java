@@ -38,6 +38,8 @@ public final class GuiTest {
                 eq("中文😀\n第二行\n中文", window.model.getText()); check(window.getTitle().startsWith("*"));
                 window.query.setText("中文"); window.model.setSelection(0, 0); window.binding.syncSelection(); window.find();
                 eq(0, window.area.getSelectionStart()); eq(2, window.area.getSelectionEnd());
+                menu("查找", "上一处").doClick(); eq(9, window.area.getSelectionStart());
+                menu("查找", "上一处").doClick(); eq(0, window.area.getSelectionStart());
                 window.replacement.setText("替换"); window.replaceCurrent(); eq("替换😀\n第二行\n中文", window.model.getText());
                 menu("编辑", "撤销").doClick(); eq("中文😀\n第二行\n中文", SyntaxPainter.text(window.area));
                 menu("编辑", "重做").doClick(); eq("替换😀\n第二行\n中文", SyntaxPainter.text(window.area));
@@ -79,6 +81,7 @@ public final class GuiTest {
             String before = edt(() -> window.model.getText());
             invokeMenu("文件", "打开…"); choose(invalid); clickAnyError();
             edt(() -> { eq(before, window.model.getText()); check(!window.model.isModified()); return null; });
+            saveFailure(directory);
             invokeMenu("文件", "打开…"); choose(Paths.get("sample.txt").toAbsolutePath());
             waitFor(() -> edt(() -> window.getTitle().startsWith("sample.txt") && window.area.isEditable()));
             robot.waitForIdle();
@@ -98,6 +101,21 @@ public final class GuiTest {
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) { for (Path path : files) Files.deleteIfExists(path); }
             Files.delete(directory);
         }
+    }
+
+    private static void saveFailure(Path directory) throws Exception {
+        Path folder = Files.createDirectory(directory.resolve("missing-after-open"));
+        Path original = folder.resolve("original.txt");
+        SafeFiles.write(original, "original");
+        invokeMenu("文件", "打开…"); choose(original);
+        waitFor(() -> edt(() -> window.area.isEditable() && window.model.getText().equals("original")));
+        Files.delete(original); Files.delete(folder);
+        edt(() -> { window.area.setCaretPosition(0); window.area.replaceSelection("edit "); return null; });
+        invokeMenu("文件", "保存"); clickDialog("另存为");
+        Path recovered = directory.resolve("recovered.txt");
+        choose(recovered);
+        waitFor(() -> Files.exists(recovered) && edt(() -> !window.model.isModified()));
+        eq("edit original", SafeFiles.read(recovered));
     }
 
     private static void modernInteractions() throws Exception {

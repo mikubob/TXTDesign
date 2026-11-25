@@ -72,9 +72,14 @@
                 </com.google.android.material.textfield.TextInputLayout>
                 <com.google.android.material.button.MaterialButton android:id="@+id/find_next" style="@style/SearchAction" android:layout_marginStart="8dp" android:text="@string/find_next" />
             </LinearLayout>
-            <com.google.android.material.button.MaterialButton android:id="@+id/replace_toggle" style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp"
-                android:text="@string/show_replace" app:icon="@drawable/ic_expand" app:iconSize="20dp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                <com.google.android.material.button.MaterialButton android:id="@+id/find_previous" style="@style/SearchAction" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/replace_toggle" style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp"
+                    android:text="@string/show_replace" app:icon="@drawable/ic_expand" app:iconSize="20dp" />
+            </LinearLayout>
+            <TextView android:id="@+id/match_count" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:visibility="gone" android:accessibilityLiveRegion="polite" android:textColor="?attr/colorOnSurfaceVariant" />
             <LinearLayout android:id="@+id/replace_panel" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:visibility="gone">
                 <com.google.android.material.textfield.TextInputLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox" android:hint="@string/replacement" app:endIconMode="clear_text"

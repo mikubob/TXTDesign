@@ -16,6 +16,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 import androidx.recyclerview.widget.RecyclerView;
 import java.util.Locale;
+import txteditor.core.TextKeys;
 import txteditor.core.text.LanguageId;
 import txteditor.core.text.SyntaxHighlighter;
 import txteditor.core.text.TokenSink;
@@ -44,9 +45,10 @@ final class MarkdownAdapter extends RecyclerView.Adapter<MarkdownAdapter.Holder>
         if (after > 0) notifyItemRangeInserted(0, after);
     }
 
-    @Override public int getItemCount() { return doc == null ? 0 : doc.count(); }
+    @Override public int getItemCount() { return doc == null ? 0 : doc.count() + (doc.isPlain() ? 1 : 0); }
 
     @Override public int getItemViewType(int position) {
+        if (doc.isPlain()) return BLOCK;
         byte type = doc.type(position);
         if (type == MdDocument.CODE || type == MdDocument.TABLE) return CODE;
         return type == MdDocument.RULE ? RULE : BLOCK;
@@ -64,6 +66,10 @@ final class MarkdownAdapter extends RecyclerView.Adapter<MarkdownAdapter.Holder>
         text.setTypeface(Typeface.DEFAULT);
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         text.setPadding(0, dp(4), 0, dp(4));
+        if (doc.isPlain()) {
+            text.setText(position == 0 ? TextKeys.PREVIEW_NODE_LIMIT : doc.source(position - 1));
+            return;
+        }
         switch (doc.type(position)) {
             case MdDocument.HEADING: heading(text, position); break;
             case MdDocument.CODE: code(text, position); break;
@@ -94,7 +100,7 @@ final class MarkdownAdapter extends RecyclerView.Adapter<MarkdownAdapter.Holder>
     }
 
     private void listItem(TextView text, int block) {
-        SpannableStringBuilder out = new SpannableStringBuilder(listPrefix(block));
+        SpannableStringBuilder out = new SpannableStringBuilder(doc.listPrefix(block));
         out.append(inline(block));
         text.setPadding(Math.max(0, doc.level(block)) * dp(16), dp(2), 0, dp(2));
         text.setText(out);
@@ -130,15 +136,6 @@ final class MarkdownAdapter extends RecyclerView.Adapter<MarkdownAdapter.Holder>
             out.append(lines[i]);
         }
         return out.toString();
-    }
-
-    private String listPrefix(int block) {
-        String text = doc.text();
-        String head = text.substring(doc.start(block), Math.min(doc.content(block), text.length()));
-        if (head.indexOf('[') >= 0) return doc.checked(block) ? "☑ " : "☐ ";
-        int digits = 0;
-        while (digits < head.length() && Character.isDigit(head.charAt(digits))) digits++;
-        return digits > 0 ? head.substring(0, digits) + ". " : "• ";
     }
 
     /** 行内样式；marker 片段是标记符本身，直接跳过不显示。 */

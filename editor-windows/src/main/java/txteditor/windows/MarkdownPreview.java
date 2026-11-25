@@ -1,5 +1,7 @@
 package txteditor.windows;
 
+import txteditor.core.TextCodec;
+import txteditor.core.TextKeys;
 import txteditor.core.text.LanguageId;
 import txteditor.core.text.SyntaxHighlighter;
 import txteditor.core.text.TokenSink;
@@ -24,8 +26,6 @@ final class MarkdownPreview {
     private static final String FAMILY = "Microsoft YaHei UI";
     /** shortcut: 预览字号固定，不跟随编辑区缩放；等预览成为主视图再接 zoom 参数。 */
     private static final int BODY = 15, CODE = 14;
-    /** 与源码高亮同一个降级阈值（设计 §11）：再大就只提示不解析了。 */
-    private static final int LIMIT = 2 << 20;
     private final JTextPane pane = new JTextPane();
     private boolean dark;
 
@@ -39,16 +39,20 @@ final class MarkdownPreview {
 
     void render(String source, boolean dark) {
         this.dark = dark;
-        MdDocument document = MdParser.parse(source.length() > LIMIT ? "" : source);
+        boolean tooLarge = TextCodec.exceedsUtf8Limit(source, TextCodec.STYLING_LIMIT_BYTES);
+        MdDocument document = MdParser.parse(tooLarge ? "" : source);
         DefaultStyledDocument target = new DefaultStyledDocument();
         Style base = target.getStyle(StyleContext.DEFAULT_STYLE);
         StyleConstants.setFontFamily(base, FAMILY);
         StyleConstants.setFontSize(base, BODY);
         StyleConstants.setForeground(base, text());
         try {
-            if (source.length() > LIMIT) target.insertString(0, "文档超过 2 MiB，预览已关闭。", muted());
-            for (int block = 0; block < document.count(); block++) renderBlock(target, document, block);
-            if (document.count() == 0 && source.length() <= LIMIT) target.insertString(0, "（空文档）", muted());
+            if (tooLarge) target.insertString(0, TextKeys.STYLING_TOO_LARGE, muted());
+            else if (document.isPlain()) {
+                target.insertString(0, TextKeys.PREVIEW_NODE_LIMIT + "\n\n", muted());
+                target.insertString(target.getLength(), source, null);
+            } else if (document.count() == 0) target.insertString(0, "（空文档）", muted());
+            else for (int block = 0; block < document.count(); block++) renderBlock(target, document, block);
         } catch (javax.swing.text.BadLocationException impossible) {
             throw new IllegalStateException(impossible);
         }
@@ -71,7 +75,7 @@ final class MarkdownPreview {
             }
             case MdDocument.LIST_ITEM: {
                 int level = Math.max(0, Math.min(6, document.level(block)));
-                String prefix = repeat("  ", level) + (document.checked(block) ? "☑ " : "• ");
+                String prefix = repeat("  ", level) + document.listPrefix(block);
                 SimpleAttributeSet marker = new SimpleAttributeSet();
                 StyleConstants.setForeground(marker, SyntaxPainter.color(txteditor.core.text.TokenType.LIST_MARKER, dark));
                 SimpleAttributeSet para = new SimpleAttributeSet();

@@ -5,18 +5,19 @@ import java.util.List;
 
 /** 解析结果：按源文本顺序排列的块，加上按需计算的行内样式。 */
 public final class MdDocument {
-    public static final byte PARAGRAPH = 1, HEADING = 2, CODE = 3, QUOTE = 4, LIST_ITEM = 5, RULE = 6, TABLE = 7;
+    public static final byte PARAGRAPH = 1, HEADING = 2, CODE = 3, QUOTE = 4, LIST_ITEM = 5, RULE = 6, TABLE = 7, LITERAL = 8;
 
     private final String text;
     private final byte[] type, level, quote;
     private final int[] start, end, content, contentStop;
-    private final String[] language;
+    private final String[] language, listPrefix;
+    private final boolean plain;
     private final boolean[] checked;
     private final int count;
     private MdSpan[][] inline;
 
     MdDocument(String text, byte[] type, int[] start, int[] end, int[] content, int[] contentStop, byte[] level,
-               byte[] quote, String[] language, boolean[] checked) {
+               byte[] quote, String[] language, String[] listPrefix, boolean[] checked, boolean plain) {
         this.text = text;
         this.type = type;
         this.start = start;
@@ -26,6 +27,8 @@ public final class MdDocument {
         this.level = level;
         this.quote = quote;
         this.language = language;
+        this.listPrefix = listPrefix;
+        this.plain = plain;
         this.checked = checked;
         this.count = type.length;
     }
@@ -40,6 +43,8 @@ public final class MdDocument {
     public byte level(int block) { return level[block]; }
     public byte quote(int block) { return quote[block]; }
     public String language(int block) { return language[block]; }
+    public boolean isPlain() { return plain; }
+    public String listPrefix(int block) { return listPrefix[block]; }
     public boolean checked(int block) { return checked[block]; }
 
     public int contentEnd(int block) {
@@ -62,7 +67,9 @@ public final class MdDocument {
         MdSpan[] cached = inline[block];
         if (cached != null) return cached;
         List<MdSpan> spans = new ArrayList<MdSpan>();
-        if (type[block] != CODE) scan(content[block], Math.min(contentEnd(block), text.length()), spans);
+        if (!plain && type[block] != CODE && type[block] != LITERAL) {
+            scan(content[block], Math.min(contentEnd(block), text.length()), spans);
+        }
         cached = spans.toArray(new MdSpan[0]);
         inline[block] = cached;
         return cached;
@@ -70,7 +77,7 @@ public final class MdDocument {
 
     /** 只认首版支持的行内标记；嵌套强调按最外层处理。 */
     private void scan(int from, int to, List<MdSpan> out) {
-        int i = from;
+        int i = from, bracket = from - 1, paren = from - 1;
         while (i < to) {
             char c = text.charAt(i);
             if (c == '\\') { i += 2; continue; }
@@ -102,10 +109,18 @@ public final class MdDocument {
                 continue;
             }
             if (c == '[') {
-                int bracket = find(i + 1, to, ']');
+                // 相邻的未闭合标记共用同一个向前游标，扫描失败后也不回头。
+                if (bracket <= i) {
+                    bracket = find(i + 1, to, ']');
+                    if (bracket < 0) bracket = to;
+                }
                 if (bracket > 0 && bracket + 1 < to && text.charAt(bracket + 1) == '(') {
-                    int close = find(bracket + 2, to, ')');
-                    if (close > 0) {
+                    if (paren < bracket + 2) {
+                        paren = find(bracket + 2, to, ')');
+                        if (paren < 0) paren = to;
+                    }
+                    if (paren < to) {
+                        int close = paren;
                         out.add(new MdSpan(MdSpan.LINK, i, i + 1, true));
                         out.add(new MdSpan(MdSpan.LINK, i + 1, bracket, false));
                         out.add(new MdSpan(MdSpan.LINK, bracket, bracket + 2, true));

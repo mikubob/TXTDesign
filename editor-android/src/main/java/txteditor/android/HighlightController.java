@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import txteditor.core.TextCodec;
 import txteditor.core.text.LanguageId;
 import txteditor.core.text.SyntaxHighlighter;
 import txteditor.core.text.TokenSink;
@@ -28,8 +29,6 @@ final class HighlightController {
     private static final int MARGIN = 50;
     /** 连续输入只跑最后一次。 */
     private static final long DEBOUNCE = 80;
-    /** 超过 2 MiB 关闭自动高亮，滚动仍然流畅优先。 */
-    private static final int MAX_TEXT = 2 * 1024 * 1024;
     private static final int[] NONE = new int[0];
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -39,6 +38,8 @@ final class HighlightController {
     /** 只在 worker 线程访问；语言变化时整体重建。 */
     private SyntaxHighlighter engine = new SyntaxHighlighter();
     private CoreEditText view;
+    private final Runnable limitChanged;
+    private boolean limited;
     private volatile LanguageId language = LanguageId.PLAIN;
     /** 文本版本与已贴 span 的版本；不相等时旧 span 视为过期。 */
     private int version, applied = -1;
@@ -50,6 +51,10 @@ final class HighlightController {
     private boolean forceFull;
     private boolean paintQueued;
     private final Runnable lex = () -> dispatch(false);
+
+    HighlightController(Runnable limitChanged) { this.limitChanged = limitChanged; }
+
+    boolean isLimited() { return limited; }
 
     void attach(CoreEditText target) { view = target; }
 
@@ -99,14 +104,17 @@ final class HighlightController {
     private void dispatch(boolean full) {
         if (view == null) return;
         main.removeCallbacks(lex);
-        if (language == LanguageId.PLAIN || view.getText().length() > MAX_TEXT) {
+        // 组合态文本尚未进入核心，此时不更新阈值或覆盖输入法样式。
+        if (BaseInputConnection.getComposingSpanStart(view.getText()) >= 0) return;
+        boolean overLimit = language != LanguageId.PLAIN
+                && TextCodec.exceedsUtf8Limit(view.getText(), TextCodec.STYLING_LIMIT_BYTES);
+        if (overLimit != limited) { limited = overLimit; limitChanged.run(); }
+        if (language == LanguageId.PLAIN || limited) {
             changes = 0;
             forceFull = true;
             clearSpans();
             return;
         }
-        // 组合态先不贴：下划线等输入法 span 与高亮同时改容易闪烁，组合结束后的提交会再触发一次。
-        if (BaseInputConnection.getComposingSpanStart(view.getText()) >= 0) return;
         // shortcut: 80 ms 内多次编辑就整体重扫；要连打也增量，需先合并脏区间再喂 update。
         boolean whole = full || forceFull || changes != 1;
         Job job = new Job(version, view.getText().toString(), language, whole,
@@ -153,10 +161,12 @@ final class HighlightController {
     private Painted tokens(int fromOffset, int toOffset) {
         int lines = engine.lineCount();
         if (lines <= 0) return new Painted(NONE, 0, 0);
-        int first = Math.max(0, engine.lineOf(fromOffset) - MARGIN);
-        int last = Math.min(lines - 1, engine.lineOf(toOffset) + MARGIN);
+        int topLine = engine.lineOf(fromOffset), bottomLine = engine.lineOf(toOffset);
+        int first = topLine, last = bottomLine;
+        while (first > 0 && first > topLine - MARGIN && !longLine(first - 1)) first--;
+        while (last < lines - 1 && last < bottomLine + MARGIN && !longLine(last + 1)) last++;
         sink.clear();
-        engine.paint(first, last, sink);
+        engine.paintVisible(first, last, fromOffset, toOffset, sink);
         int size = sink.size();
         int[] out = new int[size * 3];
         for (int i = 0; i < size; i++) {
@@ -164,8 +174,12 @@ final class HighlightController {
             out[i * 3 + 1] = sink.end(i);
             out[i * 3 + 2] = sink.type(i);
         }
-        return new Painted(out, engine.lineStart(first), engine.lineEnd(last));
+        int top = longLine(topLine) ? fromOffset : engine.lineStart(first);
+        int bottom = longLine(bottomLine) ? toOffset : engine.lineEnd(last);
+        return new Painted(out, top, bottom);
     }
+
+    private boolean longLine(int line) { return engine.lineEnd(line) - engine.lineStart(line) > SyntaxHighlighter.LONG_LINE; }
 
     private void apply(Painted painted) {
         if (view == null || painted == null) return;

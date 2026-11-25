@@ -30,12 +30,12 @@ boolean dirty = model.isModified();
 
 无内容变化不入历史，也不清空重做栈。历史双栈最多保留最近 100 条编辑；`load` 清历史，`markSaved` 不清历史。修改状态比较当前文本与最近成功保存快照，撤销回保存点自动清除标记。空文档 1 行，末尾 LF 新增 1 行。字符数是 Unicode 码点数，并非字形数。
 
-编辑事务只是合并粒度：`beginTransaction`/`endTransaction` 之间相邻、同段落、间隔小于 500 毫秒的替换合成一条历史，跨段落（含换行）或停顿超时自动断开；事务未关闭时待合并的编辑已经计入 `canUndo`。`TextKeys` 只提供默认中文文案与六个固定键（保存失败、非 UTF-8、未找到匹配、文件被其他程序修改、文件过大仅显示开头部分、文件过大未打开），呈现方式由各端决定。`SessionSnapshot` 是纯结构体，序列化属于平台层。
+编辑事务只是合并粒度：`beginTransaction`/`endTransaction` 之间相邻、同段落、间隔小于 500 毫秒的替换合成一条历史，跨段落（含换行）或停顿超时自动断开；事务未关闭时待合并的编辑已经计入 `canUndo`。`TextKeys` 只提供默认中文文案与固定文案键，呈现方式由各端决定。`SessionSnapshot` 是纯结构体，序列化属于平台层。
 
-`findNext` 不修改选区；调用方选中返回的匹配。单次替换：当前选区等于查找词则 `replace`，否则先 `findNext` 再替换。平台输入适配不得使用独立原生撤销；组合输入应保留控件组合态，提交后同步到模型。加载与撤销重做的程序回写需抑制输入回调。
+`findNext` 不修改选区；调用方选中返回的匹配。`findPrevious` 查找指定偏移之前的完整匹配，并支持回绕。`countMatches` 统计所有字面命中，重叠命中分别计数。`lineStart` 接收从 1 开始的行号。单次替换：当前选区等于查找词则 `replace`，否则先 `findNext` 再替换。平台输入适配不得使用独立原生撤销；组合输入应保留控件组合态，提交后同步到模型。加载与撤销重做的程序回写需抑制输入回调。
 
 实现：`GapBuffer` 自行维护 char 数组及间隙；`Kmp` 自行构造前缀表；`EditorModel` 用两个 `ArrayDeque` 保存可逆编辑。逻辑读取 O(1)，插入/删除 O(d+k)，扩容另加 O(N)，KMP O(N+M)/O(M)，导出、统计、修改状态 O(N)。历史空间 O(H)。UI 文本镜像和统计会增加 O(N)，不能把整次按键称为 O(1)。
 
-构建与测试：在本目录运行 `powershell -ExecutionPolicy Bypass -File .\build.ps1`。JDK 9+ 以 `--release 8` 编译；输出 `build/editor-core.jar`。2026-10-28 在 Java 21 上实际通过 `CoreTest` 的 48,482 次检查（随机编辑 12,000 步、KMP 对照 6,000 组、编辑事务与文案键及边界测试）。`src/test/java/txteditor/core/Benchmark.java` 可在构建后运行，10 次预热、30 次重复；原始记录见 `benchmark-results.csv`，完整测试说明见 `../editor-windows/TEST-REPORT.md`。文件路径、选择器、安全写入均由平台模块负责。
+构建与测试：在本目录运行 `powershell -ExecutionPolicy Bypass -File .\build.ps1`。JDK 9+ 以 `--release 8` 编译；输出 `build/editor-core.jar`。Java 21 下的 `CoreTest` 覆盖随机编辑 12,000 步、KMP 对照 6,000 组、编辑事务与文案键及边界测试。`src/test/java/txteditor/core/Benchmark.java` 可在构建后运行，10 次预热、30 次重复；原始记录见 `benchmark-results.csv`，完整测试说明见 `../editor-windows/TEST-REPORT.md`。文件路径、选择器、安全写入均由平台模块负责。
 
 供安卓界面对照的固定序列（偏移均为 UTF-16）：`load("中文😀\nabc abc")` → `setSelection(0,2)` → `replace(0,2,"新")` 得 `新😀\nabc abc`/光标1 → `undo()` 得原文/选区0..2 → `redo()` 得新文/光标1 → `findNext("abc",0)` 得4 → `setSelection(4,7)` → `replace(4,7,"中😀")` 得 `新😀\n中😀 abc`/光标7 → `undo()` 得 `新😀\nabc abc`/选区4..7。真实两端集成应按此序列再核对，而非把核心 JVM 测试当作安卓设备测试。

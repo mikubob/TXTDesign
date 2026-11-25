@@ -1,5 +1,6 @@
 package txteditor.windows;
 
+import txteditor.core.TextCodec;
 import txteditor.core.text.LanguageId;
 import txteditor.core.text.SyntaxHighlighter;
 import txteditor.core.text.TokenSink;
@@ -22,8 +23,7 @@ import java.awt.Rectangle;
  */
 final class SyntaxPainter {
     private static final int PREFETCH = 200;
-    /** 超过 2 MiB 不上色（设计 §11 的降级阈值）：每次按键要复制整篇文本，再大就只是负担。 */
-    private static final int LIMIT = 2 << 20;
+    static final String LIMITED = "txtdesign.stylingLimited";
 
     private final JTextPane pane;
     private final SyntaxHighlighter highlighter = new SyntaxHighlighter();
@@ -33,7 +33,8 @@ final class SyntaxPainter {
     private boolean enabled = true;
     private boolean dirty = true;
     private boolean queued;
-    private int paintedFrom = -1, paintedTo = -1;
+    private int paintedFrom = -1, paintedTo = -1, priorTop = -1, priorBottom = -1;
+    private final javax.swing.Timer editTimer = new javax.swing.Timer(80, event -> paint());
     private int editStart, editOldEnd, editNewEnd;
     private boolean pendingEdit, pendingReload;
 
@@ -41,6 +42,7 @@ final class SyntaxPainter {
         this.pane = pane;
         this.dark = dark;
         palette();
+        editTimer.setRepeats(false);
     }
 
     void setLanguage(LanguageId id) {
@@ -48,16 +50,20 @@ final class SyntaxPainter {
         highlighter.setLanguage(id);
         dirty = true;
         paintedFrom = paintedTo = -1;
+        reportLimit();
         schedule();
     }
 
     /** 整篇换文本（打开文件、撤销重做、会话恢复）。 */
     void load(String text) {
-        enabled = text.length() <= LIMIT;
+        editTimer.stop();
+        enabled = !TextCodec.exceedsUtf8Limit(text, TextCodec.STYLING_LIMIT_BYTES);
         highlighter.load(enabled ? text : "");
         pendingEdit = pendingReload = false;
         dirty = true;
         paintedFrom = paintedTo = -1;
+        if (!enabled) clearStyles();
+        reportLimit();
         schedule();
     }
 
@@ -66,8 +72,7 @@ final class SyntaxPainter {
      * 避免在 DocumentFilter 写锁里复制整篇文本、也避免在编辑事件中再发通知。
      */
     void edited(int start, int oldEnd, int newEnd) {
-        if (!enabled) return;
-        if (pendingEdit || pendingReload) pendingReload = true;
+        if (!enabled || pendingEdit || pendingReload) pendingReload = true;
         else {
             pendingEdit = true;
             editStart = start;
@@ -75,7 +80,7 @@ final class SyntaxPainter {
             editNewEnd = newEnd;
         }
         dirty = true;
-        schedule();
+        editTimer.restart();
     }
 
     void applyTheme(boolean nextDark) {
@@ -89,7 +94,7 @@ final class SyntaxPainter {
 
     /** 只重画可视行，用于滚动、缩放与窗口变化。 */
     void schedule() {
-        if (queued) return;
+        if (queued || editTimer.isRunning()) return;
         queued = true;
         SwingUtilities.invokeLater(() -> {
             queued = false;
@@ -98,23 +103,27 @@ final class SyntaxPainter {
     }
 
     private void paint() {
-        if (!enabled || !pane.isDisplayable()) return;
+        if (!pane.isDisplayable() || editTimer.isRunning()) return;
         if (composing()) return; // 组合结束后 flushComposition → refresh 会重新排一次
         if (pendingEdit || pendingReload) applyPending();
         if (!enabled) return;
         int count = highlighter.lineCount();
         if (count <= 0) { paintedFrom = paintedTo = -1; return; }
-        int[] visible = visibleLines(count);
+        int[] visible = visibleOffsets();
+        int first = highlighter.lineOf(visible[0]), last = highlighter.lineOf(visible[1]);
+        boolean longEdge = longLine(first) || longLine(last);
         int[] range;
         if (paintedFrom < 0) {
-            range = paintRange(count, visible[0], visible[1], true);
+            range = paintRange(count, first, last, true);
         } else if (dirty) {
-            range = paintRange(count, visible[0], visible[1], false);
+            range = paintRange(count, first, last, false);
         } else {
-            if (visible[0] >= paintedFrom && visible[1] <= paintedTo) return;
-            range = paintRange(count, visible[0], visible[1], true);
+            if (first >= paintedFrom && last <= paintedTo
+                    && (!longEdge || visible[0] == priorTop && visible[1] == priorBottom)) return;
+            range = paintRange(count, first, last, true);
         }
-        apply(range[0], range[1]);
+        apply(range[0], range[1], visible[0], visible[1]);
+        priorTop = visible[0]; priorBottom = visible[1];
         paintedFrom = range[0];
         paintedTo = range[1];
         dirty = false;
@@ -134,7 +143,13 @@ final class SyntaxPainter {
         boolean reload = pendingReload;
         pendingEdit = pendingReload = false;
         String text = text(pane);
-        if (text.length() > LIMIT) { enabled = false; return; }
+        boolean withinLimit = !TextCodec.exceedsUtf8Limit(text, TextCodec.STYLING_LIMIT_BYTES);
+        if (withinLimit != enabled) {
+            enabled = withinLimit;
+            if (!enabled) { clearStyles(); highlighter.load(""); }
+            reportLimit();
+        }
+        if (!enabled) return;
         if (reload) { // 多次编辑合并时偏移不再连续，只能整篇重扫
             highlighter.load(text);
             paintedFrom = paintedTo = -1;
@@ -152,10 +167,21 @@ final class SyntaxPainter {
         return new int[] {from, to};
     }
 
-    private void apply(int from, int to) {
+    private void clearStyles() {
+        StyledDocument doc = pane.getStyledDocument();
+        doc.setCharacterAttributes(0, doc.getLength(), new SimpleAttributeSet(), true);
+    }
+
+    private void reportLimit() {
+        pane.putClientProperty(LIMITED, !enabled && highlighter.language() != LanguageId.PLAIN);
+    }
+
+    private boolean longLine(int line) { return highlighter.lineEnd(line) - highlighter.lineStart(line) > SyntaxHighlighter.LONG_LINE; }
+
+    private void apply(int from, int to, int top, int bottom) {
         StyledDocument document = pane.getStyledDocument();
         int length = document.getLength();
-        highlighter.paint(from, to, sink);
+        highlighter.paintVisible(from, to, top, bottom, sink);
         SimpleAttributeSet plain = new SimpleAttributeSet(); // 空集：清掉上一轮留下的颜色
         for (int line = from; line <= to; line++) {
             int start = highlighter.lineStart(line), end = highlighter.lineEnd(line);
@@ -170,15 +196,13 @@ final class SyntaxPainter {
         }
     }
 
-    private int[] visibleLines(int count) {
+    private int[] visibleOffsets() {
         Rectangle rect = pane.getVisibleRect();
-        if (rect.height <= 0 || rect.width <= 0) return new int[] {0, Math.min(count - 1, PREFETCH)};
-        int text = highlighter.text().length();
-        int top = clamp(pane.viewToModel(new Point(rect.x + 1, rect.y + 1)), text);
-        int bottom = clamp(pane.viewToModel(new Point(rect.x + 1, rect.y + rect.height - 1)), text);
-        int first = highlighter.lineOf(top), last = highlighter.lineOf(bottom);
-        if (last < first) last = first;
-        return new int[] {first, last};
+        int length = highlighter.text().length();
+        if (rect.height <= 0 || rect.width <= 0) return new int[] {0, Math.min(length, 2048)};
+        int top = clamp(pane.viewToModel(new Point(rect.x + 1, rect.y + 1)), length);
+        int bottom = clamp(pane.viewToModel(new Point(rect.x + rect.width - 1, rect.y + rect.height - 1)), length);
+        return new int[] {top, Math.max(top, bottom)};
     }
 
     private static int clamp(int offset, int length) {
